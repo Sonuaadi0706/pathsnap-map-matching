@@ -88,6 +88,9 @@ d = {
     "features": [[k, float(v)] for k, v in fi.head(8).items()],
     "smoke": {k: smoke[k] for k in ["00000009", "00000077"]} | {"checks": smoke["checks"]},
 }
+lc = pd.read_csv(RES / "learning_curve.csv").groupby(["model", "n_trips"])[["train_top1", "val_top1"]].mean()
+d["lc"] = {"sizes": [int(n) for n in lc.loc["lgbm_v2"].index],
+           **{m: {"train": lc.loc[m].train_top1.tolist(), "val": lc.loc[m].val_top1.tolist()} for m in ["logreg", "lgbm_v2"]}}
 (ROOT / "deck").mkdir(exist_ok=True)
 json.dump(d, open(ROOT / "deck/deck_data.json", "w"), indent=1, default=float)
 print("deck data written")

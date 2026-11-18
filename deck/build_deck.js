@@ -201,6 +201,26 @@ stat(s, 8.4, 3.3, 4.3, `${f3(R2.r1_scorer.test_f1)} → ${f3(R2.scorer.test_f1)}
 stat(s, 8.4, 5.1, 4.3, `${f3(R2.r1_scorer.test_ll)} → ${f3(R2.scorer.test_ll)}`, "observation log loss on student-test (lower is better)", false, "v3", 34);
 s.addNotes(`Round 1 showed hyperparameters were not the limit, so round 2 changed what the model sees and optimises, with labels, folds and metrics fixed. More candidates alone do not help; the 18 context features do; LambdaRank (rank the candidates of one fix) helps again. A second Optuna search of ${R2.optuna2.n_trials} trials (top five re-scored at full fidelity) again tied the existing parameters within fold noise, so they were kept. We also re-trained all six families on the new table: LightGBM is still the best binary model (CV top-1 ${f3(R2.six_v2.lgbm.cv_top1)}), Random Forest and the MLP improve too, while Naive Bayes (${f3(R2.six_v2.gnb.cv_top1_v1)} to ${f3(R2.six_v2.gnb.cv_top1)}) and KNN (${f3(R2.six_v2.knn.cv_top1_v1)} to ${f3(R2.six_v2.knn.cv_top1)}) get worse with the extra, partly redundant features. Likely question: is it overfitting? Train-fold top-1 is ${f3(R2.scorer.train_top1)} vs ${f3(R2.scorer.cv_top1)} on validation folds, a larger gap than round 1, but validation and student-test both improved.`);
 
+// 8c --------------------------------------------------------------- learning curves
+const LC = D.lc, LS = LC.lgbm_v2, LL = LC.logreg, nL = LC.sizes.length - 1, i16 = LC.sizes.indexOf(16);
+s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Tuning & decoding" });
+s.addText("Learning curves: more trips would add little", { placeholder: "title" });
+const lcl = LC.sizes.map(String);
+s.addChart(pres.charts.LINE, [
+  { name: "scorer, training trips", labels: lcl, values: LS.train },
+  { name: "scorer, unseen trips", labels: lcl, values: LS.val },
+  { name: "LogReg, training trips", labels: lcl, values: LL.train },
+  { name: "LogReg, unseen trips", labels: lcl, values: LL.val },
+], { x: 0.6, y: 1.35, w: 7.4, h: 5.5, chartColors: ["111111", "111111", "A6A6A6", "A6A6A6"], lineDash: "solid",
+  lineSize: 2.25, lineDataSymbolSize: 7, showLegend: true, legendPos: "b", legendFontSize: 11,
+  valAxisMinVal: 0.86, valAxisMaxVal: 1.0, valAxisMajorUnit: 0.02, valAxisLabelFormatCode: "0.00",
+  showCatAxisTitle: true, catAxisTitle: "training trips used", catAxisTitleFontSize: 11, catAxisTitleColor: "595959", catAxisTitleFontFace: "+mn-lt",
+  ...chartBase("Observation top-1, mean of 5 folds (16 validation trips fixed)"), showValue: false });
+stat(s, 8.4, 1.5, 4.3, `${f3(LS.train[0] - LS.val[0])} → ${f3(LS.train[nL] - LS.val[nL])}`, `scorer train-validation gap, ${LC.sizes[0]} → ${LC.sizes[nL]} trips: narrows, does not close`, false, "l1", 34);
+stat(s, 8.4, 3.3, 4.3, `${f3(LS.val[i16])} → ${f3(LS.val[nL])}`, `scorer top-1 on unseen trips, 16 → ${LC.sizes[nL]} trips: flat`, false, "l2", 34);
+stat(s, 8.4, 5.1, 4.3, f3(LL.val[nL]), "logistic regression: both curves meet here, so it under-fits", false, "l3", 34);
+s.addNotes(`How we tested under- and over-fitting. The 16 validation trips of each fold are fixed and the model is retrained on ${LC.sizes.join(", ")} of the other trips; student-test is not used. Logistic regression: training and validation curves meet at ${f3(LL.val[nL])}, the signature of under-fitting, so more data cannot help it. Deployed scorer: it fits ${LC.sizes[0]} trips perfectly, and as trips are added training accuracy falls to ${f3(LS.train[nL])} while validation rises to ${f3(LS.val[nL])}; the remaining gap of ${f3(LS.train[nL] - LS.val[nL])} is mild over-fitting, but its validation curve is above logistic regression at every size. Validation is flat from 16 trips on (fold-to-fold std is about 0.02), so the remaining errors are left to the HMM decoder, not to more scorer training.`);
+
 // 9 ---------------------------------------------------------------- HMM
 const FT = R2.test, FTR = R2.train, VALD = R2.val;
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Tuning & decoding" });
@@ -280,6 +300,16 @@ s.addText(`${f3(D.baseline.test_top1)} → ${f3(FT.cls.top1)} → ${f3(FT.hmm.to
 s.addNotes("Close: each stage is measured on the same trips with the same labels. Code, logs, maps and the report are in the public repository; the live demo runs any of the evaluator's ten trips through the API.");
 
 pres.writeFile({ fileName: OUT }).then(async () => {
+  // pptxgenjs takes one dash style per chart: dash the two "training trips" series of the learning-curve chart
+  const JSZip = require("jszip");
+  const zip = await JSZip.loadAsync(fs.readFileSync(OUT));
+  for (const f of Object.keys(zip.files).filter((n) => /^ppt\/charts\/chart\d+\.xml$/.test(n))) {
+    const xml = await zip.file(f).async("string");
+    if (!xml.includes("scorer, training trips")) continue;
+    zip.file(f, xml.replace(/<c:ser>[\s\S]*?<\/c:ser>/g, (ser) =>
+      (ser.includes("training trips") ? ser.replace('<a:prstDash val="solid"/>', '<a:prstDash val="dash"/>') : ser)));
+  }
+  fs.writeFileSync(OUT, await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
   if (applyTheme) await applyTheme(OUT, THEME);
   console.log("written", OUT, applyTheme ? "(theme applied)" : "(default theme)");
 });
