@@ -45,7 +45,7 @@ pres.defineSlideMaster({
   title: "DARK", background: { color: C.text1 },
   objects: [{ placeholder: { options: { name: "title", type: "title", x: 0.8, y: 2.3, w: 11.7, h: 1.3, fontSize: 48, bold: true,
     color: C.background1, valign: "bottom" }, text: "" } },
-  { placeholder: { options: { name: "body", type: "body", x: 0.8, y: 3.75, w: 11.7, h: 1.4, fontSize: 20,
+  { placeholder: { options: { name: "body", type: "body", x: 0.8, y: 3.75, w: 11.7, h: 1.9, fontSize: 20,
     color: C.accent4, valign: "top" }, text: "" } }],
 });
 pres.defineSlideMaster({
@@ -86,7 +86,7 @@ pres.addSection({ title: "Introduction" });
 let s = pres.addSlide({ masterName: "DARK", sectionTitle: "Introduction" });
 s.addText("PathSnap", { placeholder: "title" });
 s.addText("Matching noisy GPS to the road network with a learned scorer + HMM/Viterbi decoding" +
-  (D.team.team_name ? "\n" + D.team.team_name : ""), { placeholder: "body" });
+  ((D.team.members || []).length ? "\n" + D.team.members.map((m, i) => m.name + " (" + m.srn + ")" + (i % 2 === 0 && i < D.team.members.length - 1 ? "  ·  " : (i < D.team.members.length - 1 ? "\n" : ""))).join("") : ""), { placeholder: "body" });
 s.addNotes("PathSnap reconstructs the road route a vehicle actually drove from noisy GPS fixes. Two stages: a classifier scores candidate road arcs per fix, an HMM decoded with Viterbi turns those scores into a connected route. Everything shown is from our runs; numbers are on the 10 student-test trips unless stated.");
 
 // 2 ---------------------------------------------------------------- problem

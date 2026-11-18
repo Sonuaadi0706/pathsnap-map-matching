@@ -169,6 +169,17 @@ scores for three stages (classifier only, + HMM/Viterbi, + route re-alignment). 
 * **Route continuity** – share of consecutive fix pairs whose predicted arcs are identical or connected head→tail.
 * **Route precision / recall / F1** – length-weighted overlap between predicted and reference arc sets.
 
+## Team
+
+| Name | SRN | GitHub |
+|---|---|---|
+| G A Aadish | PES1UG24CS569 | [Sonuaadi0706](https://github.com/Sonuaadi0706) |
+| Bhuvan E | PES1UG24CS568 | [bhuvan11000](https://github.com/bhuvan11000) |
+| Prajwal S J | PES1UG24CS594 | [psj032005-algo](https://github.com/psj032005-algo) |
+| Prakash N Heroor | PES1UG24CS595 | [prakashheroor89-stack](https://github.com/prakashheroor89-stack) |
+
+UE24CS352A Machine Learning hackathon, PES University (RR Campus).
+
 ## AI assistance
 
 Code, experiments and documents were produced with the help of an AI coding

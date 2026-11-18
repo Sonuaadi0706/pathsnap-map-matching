@@ -176,14 +176,14 @@ P("<font size=14>Distributed Map-Matching &amp; Route Reconstruction</font>",
 P("Technical Report  |  UE24CS352A Machine Learning Hackathon  |  PES University, RR Campus",
   ParagraphStyle("t3", parent=BODY, alignment=TA_CENTER, textColor=colors.HexColor("#555555")))
 story.append(Spacer(1, 1.2 * cm))
-team_rows = [["Team", TEAM.get("team_name", "<i>(team name to be filled in)</i>")]]
+team_rows = [["Team", TEAM["team_name"]]] if TEAM.get("team_name") else []
 for mbr in TEAM.get("members", []):
-    team_rows.append(["Member", mbr])
+    team_rows.append(["Team member", f"{mbr['name']}  |  {mbr['srn']}  |  GitHub: {mbr['github']}"])
 if not TEAM.get("members"):
     team_rows.append(["Members / SRN", "<i>(to be filled in)</i>"])
 team_rows.append(["Repository", TEAM.get("repo_url", "<i>(GitHub URL)</i>")])
 team_rows.append(["Date", date.today().strftime("%d %B %Y")])
-table(team_rows, widths=[3.5 * cm, 10 * cm], header=False, zebra=False)
+table(team_rows, widths=[3.0 * cm, 12.5 * cm], header=False, zebra=False)
 story.append(Spacer(1, 0.8 * cm))
 hm = HAB.loc[SEL]
 P("<b>Summary.</b> Each GPS fix is matched to a road arc in two stages. (1) A candidate scorer ranks the "
@@ -1104,6 +1104,6 @@ def footer(c, d):
 (ROOT / "report").mkdir(exist_ok=True)
 out = ROOT / "report" / "PathSnap_Technical_Report.pdf"
 doc = SimpleDocTemplate(str(out), pagesize=A4, leftMargin=1.8 * cm, rightMargin=1.8 * cm, topMargin=1.6 * cm,
-                        bottomMargin=1.7 * cm, title="PathSnap Technical Report", author=TEAM.get("team_name", "PathSnap team"))
+                        bottomMargin=1.7 * cm, title="PathSnap Technical Report", author=", ".join(m["name"] for m in TEAM.get("members", [])) or "PathSnap team")
 doc.build(story, onFirstPage=footer, onLaterPages=footer)
 print("written", out)
