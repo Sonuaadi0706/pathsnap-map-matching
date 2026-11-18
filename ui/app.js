@@ -47,8 +47,8 @@ async function run() {
     const resp = await fetch(API + "/predict", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trip_id: selected }) });
     if (!resp.ok) throw new Error(resp.status + " " + (await resp.text()));
     const d = await resp.json();
+    show(d, (performance.now() - t0) / 1000);  // fill the panel first so the map has its final size
     draw(d);
-    show(d, (performance.now() - t0) / 1000);
     status(`Trip ${d.trip_id} matched in ${((performance.now() - t0) / 1000).toFixed(2)} s (round trip).`);
   } catch (e) { status("Request failed: " + e); }
   $("run").disabled = false;
@@ -57,10 +57,9 @@ async function run() {
 function draw(d) {
   layers.clearLayers();
   const gps = d.gps_points;
-  gps.forEach((p) => L.circleMarker(p, { radius: 3, color: "#444", weight: 1, fillColor: "#888", fillOpacity: 0.8 }).addTo(layers));
+  gps.forEach((p) => L.circleMarker(p, { radius: 2.5, color: "#555", weight: 0, fillColor: "#666", fillOpacity: 0.45 }).addTo(layers));
   const lines = d.predicted_route_lines;
-  L.polyline(lines, { color: "#1f4fd1", weight: 5, opacity: 0.8 }).addTo(layers);
-  layers.eachLayer((l) => { if (l instanceof L.CircleMarker) l.bringToFront(); });
+  L.polyline(lines, { color: "#1f4fd1", weight: 4, opacity: 0.9 }).addTo(layers);
   if (gps.length) {
     L.circleMarker(gps[0], { radius: 7, color: "#137a3a", fillOpacity: 1 }).bindTooltip("start").addTo(layers);
     L.circleMarker(gps[gps.length - 1], { radius: 7, color: "#b00020", fillOpacity: 1 }).bindTooltip("end").addTo(layers);
@@ -99,4 +98,10 @@ function show(d, rt) {
 
 $("connect").onclick = connect;
 $("run").onclick = run;
-connect();
+// optional deep link: ?api=...&trip=<id> preselects a trip and runs it once
+connect().then(() => {
+  const t = params.get("trip");
+  if (!t) return;
+  const b = [...document.querySelectorAll(".trip")].find((x) => x.textContent === t);
+  if (b) { b.click(); run(); }
+});

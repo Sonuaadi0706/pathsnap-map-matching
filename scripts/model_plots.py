@@ -111,7 +111,7 @@ ps.label_bars(ax, b2, size=7)
 ax.set_xticks(x, labels)
 ax.set_ylim(0.6, 1.02)
 ax.set_title("Over/under-fitting check: observation top-1, train vs validation (CV)")
-ax.legend(loc="upper left", ncol=2)
+ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2)
 fig.savefig(FIG / "cmp_train_vs_cv.png")
 plt.close(fig)
 
@@ -151,7 +151,8 @@ plt.close(fig)
 piv.to_csv(RES / "test_pertrip_top1_matrix.csv")
 
 # confusion matrices (candidate level, binary, threshold 0.5) on student-test
-fig, axes = plt.subplots(1, len(BASE), figsize=(2.3 * len(BASE), 2.6))
+fig, axes = plt.subplots(2, 3, figsize=(8.5, 6))
+axes = axes.ravel()
 for ax, m in zip(axes, BASE):
     s = pd.read_pickle(RES / f"test_scores_{m}.pkl")
     s = s[s.reliable]
@@ -161,14 +162,15 @@ for ax, m in zip(axes, BASE):
     ax.imshow(cmn, cmap="Greys", vmin=0, vmax=1)
     for i in range(2):
         for j in range(2):
-            ax.text(j, i, f"{cmn[i, j]:.3f}\n({cm[i, j]})", ha="center", va="center", fontsize=7,
+            ax.text(j, i, f"{cmn[i, j]:.3f}\n({cm[i, j]})", ha="center", va="center", fontsize=9,
                     color="white" if cmn[i, j] > 0.5 else "black")
     ax.set_xticks([0, 1], ["other", "ref"], fontsize=7)
     ax.set_yticks([0, 1], ["other", "ref"], fontsize=7)
     ax.set_xlabel("predicted", fontsize=7)
     ax.set_title(SHORT[m].replace("\n", " "), fontsize=9)
     ax.grid(False)
-axes[0].set_ylabel("true", fontsize=7)
+axes[0].set_ylabel("true", fontsize=8)
+axes[3].set_ylabel("true", fontsize=8)
 fig.suptitle("Candidate-level confusion matrices (student-test, threshold 0.5, row-normalised)", fontsize=10)
 fig.tight_layout()
 fig.savefig(FIG / "cm_candidates.png")
@@ -266,8 +268,9 @@ if hab.exists():
         lo = min(H.loc[HM, a].min(), H.loc[HM, b].min())
         ax.set_ylim(max(0, lo - 0.05), 1.0)
         ax.set_title(f"Student-test {t}")
-    axes[0].legend(loc="lower left", fontsize=8)
-    fig.tight_layout()
+    h_, l_ = axes[0].get_legend_handles_labels()
+    fig.legend(h_, l_, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
     fig.savefig(FIG / "hmm_ablation_models.png")
     plt.close(fig)
     pt = pd.read_csv(RES / "hmm_test_pertrip.csv", dtype={"trip": str})
@@ -281,8 +284,9 @@ if hab.exists():
         ax.set_xticks(xt, q.trip, fontsize=7, rotation=30)
         ax.set_ylim(max(0, min(q[a].min(), q[b].min()) - 0.05), 1.0)
         ax.set_title(f"Per-trip {t} ({NAMES[sel]}, student-test)")
-    axes[0].legend(loc="lower left", fontsize=8)
-    fig.tight_layout()
+    h_, l_ = axes[0].get_legend_handles_labels()
+    fig.legend(h_, l_, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=(0, 0.07, 1, 1))
     fig.savefig(FIG / "hmm_pertrip.png")
     plt.close(fig)
     G = pd.read_csv(RES / "hmm_grid.csv")

@@ -90,7 +90,7 @@ def eda_map(part, tid):
     return out
 
 
-def prediction_map(part, tid, predictor):
+def prediction_map(part, tid, predictor, detail=False):
     res = predictor.predict_trip(tid, part, use_hmm=True)
     trip, cls, hmm, route = res["trip"], res["cls_pred"], res["hmm_pred"], res["route"]
     m = base_map(trip)
@@ -107,7 +107,7 @@ def prediction_map(part, tid, predictor):
         folium.PolyLine(arcs_to_lines(trip, ref), color="#2e7d32", weight=8, opacity=0.45).add_to(fg)
         fg.add_to(m)
     gps_layer(trip, m)
-    fg = folium.FeatureGroup(name="Classifier-only prediction (per fix)", show=False)
+    fg = folium.FeatureGroup(name="Classifier-only prediction (per fix)", show=detail)
     folium.PolyLine(arcs_to_lines(trip, collapse(cls)), color="#ef6c00", weight=3, opacity=0.9,
                     dash_array="6,6").add_to(fg)
     fg.add_to(m)
@@ -116,11 +116,20 @@ def prediction_map(part, tid, predictor):
     fg.add_to(m)
     if len(ref):
         wrong = np.where(rel & (hmm != lab))[0]
-        fg = folium.FeatureGroup(name=f"Fixes matched to a non-reference arc ({len(wrong)})", show=False)
+        fg = folium.FeatureGroup(name=f"Fixes matched to a non-reference arc ({len(wrong)})", show=detail)
         for i in wrong[:: max(1, len(wrong) // 800)]:
             folium.CircleMarker((trip.track[i, 1], trip.track[i, 0]), radius=4, color="#000", weight=1.5,
                                 fill=False, tooltip=f"fix {i}: pred arc {hmm[i]}, ref arc {lab[i]}").add_to(fg)
         fg.add_to(m)
+    if detail and len(ref):
+        # zoom to the 120-fix window with the most classifier-only errors (auto-selected, documented)
+        err = (rel & (cls != lab)).astype(int)
+        win = 120
+        cs = np.convolve(err, np.ones(win, int), mode="valid")
+        i0 = int(np.argmax(cs))
+        seg_ll = trip.track[i0:i0 + win]
+        m.fit_bounds([[seg_ll[:, 1].min(), seg_ll[:, 0].min()], [seg_ll[:, 1].max(), seg_ll[:, 0].max()]])
+        stats["detail_window"] = [i0, i0 + win]
     folium.LayerControl(collapsed=False).add_to(m)
     txt = (f"<br>top-1: classifier {stats['cls_top1']:.3f} &rarr; HMM {stats['hmm_top1']:.3f}"
            f"<br>route F1: classifier {stats['cls_route_f1']:.3f} &rarr; HMM {stats['hmm_route_f1']:.3f}") if stats else ""
@@ -130,9 +139,9 @@ def prediction_map(part, tid, predictor):
                                         ("Classifier + HMM route", "#c62828", 3, "solid"),
                                         ("Road network", "#9e9e9e", 2, "solid")],
                                        f"{part} trip {tid} ({predictor.cfg['model']}){txt}"))
-    out = MAPS / f"{part}_{tid}.html"
+    out = MAPS / f"{part}_{tid}{'_detail' if detail else ''}.html"
     m.save(out)
-    json.dump(stats, open(MAPS / f"{part}_{tid}.json", "w"), indent=1)
+    json.dump(stats, open(MAPS / f"{part}_{tid}{'_detail' if detail else ''}.json", "w"), indent=1)
     return out
 
 
@@ -140,6 +149,9 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args[0] == "--eda":
         print(eda_map(args[1], args[2]))
+    elif args[0] == "--detail":
+        from pathsnap.pipeline import Predictor
+        print(prediction_map(args[1], args[2], Predictor(), detail=True))
     else:
         from pathsnap.pipeline import Predictor
         p = Predictor()

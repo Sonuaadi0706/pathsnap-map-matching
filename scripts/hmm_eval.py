@@ -88,11 +88,17 @@ if __name__ == "__main__":
     t_all = time.time()
     oof = oof_scores(SEL)
     # ---- decoder grid on training OOF scores ----
-    grid = []
-    betas, ws = [5, 10, 20, 40, 80], [0.5, 1.0, 2.0]
+    # initial grid {5..80} x {0.5,1,2}; its optimum lay on the boundary (beta=5, w=0.5), so the grid was
+    # extended towards smaller values. Already-evaluated settings are reused from results/hmm_grid.csv.
+    betas, ws = [2, 3.5, 5, 10, 20, 40, 80], [0.25, 0.35, 0.5, 1.0, 2.0]
+    prev = pd.read_csv(RES / "hmm_grid.csv") if (RES / "hmm_grid.csv").exists() else pd.DataFrame()
+    grid = prev.to_dict("records")
+    done = {(float(r["beta"]), float(r["w_emit"])) for r in grid}
     trips = sorted(oof.trip.unique())
     groups = {t: g for t, g in oof.groupby("trip")}
     for beta, w in itertools.product(betas, ws):
+        if (float(beta), float(w)) in done:
+            continue
         p = HMMParams(beta=beta, w_emit=w)
         rows = Parallel(n_jobs=4)(delayed(trip_eval)(t, "train", groups[t], p, False) for t in trips)
         d = pd.DataFrame(rows)
@@ -106,6 +112,9 @@ if __name__ == "__main__":
     best = G.sort_values(["hmm_top1", "hmm_route_f1_nofill"], ascending=False).iloc[0]
     bp = HMMParams(beta=float(best.beta), w_emit=float(best.w_emit))
     print("best decoder", bp, flush=True)
+    # per-trip effect on the training trips (OOF scores) with the selected decoder -- shows where HMM hurts
+    rows = Parallel(n_jobs=4)(delayed(trip_eval)(t, "train", groups[t], bp, True) for t in trips)
+    pd.DataFrame(rows).to_csv(RES / "hmm_train_oof_pertrip.csv", index=False)
 
     # ---- classifier-only vs HMM on student-test for every model ----
     abl, per = [], []

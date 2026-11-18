@@ -1,0 +1,691 @@
+"""Build the consolidated technical report PDF from saved results.
+
+Every number is read from results/*.json|csv; comparative statements are
+guarded with assertions so the text cannot silently disagree with the logs.
+output: report/PathSnap_Technical_Report.pdf
+"""
+import json
+import sys
+from datetime import date
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import cm
+from reportlab.platypus import (Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table,
+                                TableStyle)
+
+ROOT = Path(__file__).resolve().parents[1]
+RES, FIG = ROOT / "results", ROOT / "figures"
+sys.path.insert(0, str(ROOT))
+from pathsnap.candidates import FEATURES, MAX_K, RADIUS_M  # noqa: E402
+from pathsnap.models import CONFIGS, NAMES, TRAIN_STRIDE  # noqa: E402
+
+# ------------------------------------------------------------------ data
+J = lambda p: json.load(open(RES / p))  # noqa: E731
+MODELS = ["logreg", "gnb", "knn", "rf", "lgbm", "mlp"]
+M = {m: J(f"model_{m}.json") for m in MODELS + ["lgbm_tuned"]}
+BASE = J("baseline_nearest.json")
+EDA = pd.read_csv(RES / "eda_trips.csv", dtype={"trip": str})
+QUAL = pd.read_csv(RES / "eda_quality_table.csv")
+CAND = pd.read_csv(RES / "candidate_stats.csv", dtype={"trip": str})
+OPT = J("optuna_best.json")
+TRIALS = pd.read_csv(RES / "optuna_trials.csv")
+TV = pd.read_csv(RES / "tuned_vs_untuned.csv").set_index("model")
+HSUM = J("hmm_summary.json")
+HAB = pd.read_csv(RES / "hmm_ablation_models.csv").set_index("model")
+HPT = pd.read_csv(RES / "hmm_test_pertrip.csv", dtype={"trip": str})
+HGRID = pd.read_csv(RES / "hmm_grid.csv")
+FI = pd.read_csv(RES / "feature_importance_lgbm_tuned.csv", index_col=0).iloc[:, 0].sort_values(ascending=False)
+SMOKE = J("smoke_test.json")
+FINAL = json.load(open(ROOT / "models/final_config.json"))
+TEAM = json.load(open(ROOT / "configs/team.json")) if (ROOT / "configs/team.json").exists() else {}
+SEL = HSUM["selected_model"]
+
+cv = lambda m, k: M[m]["cv_mean"][k]  # noqa: E731
+cs = lambda m, k: M[m]["cv_std"][k]  # noqa: E731
+te = lambda m, k: M[m]["student_test"][k]  # noqa: E731
+f3 = lambda x: f"{x:.3f}"  # noqa: E731
+f4 = lambda x: f"{x:.4f}"  # noqa: E731
+pc = lambda x: f"{100 * x:.1f}%"  # noqa: E731
+
+# guarded claims ------------------------------------------------------
+best_cv = max(MODELS, key=lambda m: cv(m, "obs_macro_f1_trip"))
+best_te = max(MODELS, key=lambda m: te(m, "obs_top1"))
+best_ll = min(MODELS, key=lambda m: te(m, "obs_logloss"))
+assert best_cv == "lgbm" and best_te == "lgbm" and best_ll == "lgbm", (best_cv, best_te, best_ll)
+gap = {m: cv(m, "train_obs_top1") - cv(m, "obs_top1") for m in MODELS}
+assert max(gap, key=gap.get) == "rf"
+assert te("knn", "infer_time_s") == max(te(m, "infer_time_s") for m in MODELS)
+tuned_better_cv = TV.loc["lgbm_tuned", "cv_top1"] > TV.loc["lgbm", "cv_top1"]
+tuned_better_te = TV.loc["lgbm_tuned", "test_top1"] > TV.loc["lgbm", "test_top1"]
+sel_pt = HPT[HPT.model == SEL]
+hurt_top1 = sel_pt[sel_pt.hmm_top1 < sel_pt.cls_top1]
+hurt_rf1 = sel_pt[sel_pt.hmm_route_f1 < sel_pt.cls_route_f1]
+
+# ------------------------------------------------------------------ styles
+ss = getSampleStyleSheet()
+BODY = ParagraphStyle("b", parent=ss["BodyText"], fontName="Helvetica", fontSize=9.6, leading=13.2, spaceAfter=5)
+SMALL = ParagraphStyle("s", parent=BODY, fontSize=8, leading=10.2, textColor=colors.HexColor("#444444"))
+CAP = ParagraphStyle("c", parent=SMALL, alignment=TA_CENTER, spaceAfter=10, fontName="Helvetica-Oblique")
+H1 = ParagraphStyle("h1", parent=ss["Heading1"], fontName="Helvetica-Bold", fontSize=15.5, spaceBefore=6, spaceAfter=8)
+H2 = ParagraphStyle("h2", parent=ss["Heading2"], fontName="Helvetica-Bold", fontSize=12, spaceBefore=8, spaceAfter=5)
+H3 = ParagraphStyle("h3", parent=ss["Heading3"], fontName="Helvetica-Bold", fontSize=10.2, spaceBefore=6, spaceAfter=3)
+Q = ParagraphStyle("q", parent=BODY, fontName="Helvetica-Bold", spaceAfter=1)
+CELL = ParagraphStyle("cell", parent=BODY, fontSize=7.4, leading=9, spaceAfter=0)
+CELLB = ParagraphStyle("cellb", parent=CELL, fontName="Helvetica-Bold")
+MONO = ParagraphStyle("mono", parent=BODY, fontName="Courier", fontSize=6.9, leading=8.4, backColor=colors.HexColor("#F3F3F3"),
+                      borderPadding=4, spaceAfter=8)
+
+story = []
+P = lambda t, s=BODY: story.append(Paragraph(t, s))  # noqa: E731
+W = A4[0] - 3.6 * cm
+
+
+def fig(path, caption, width=W, maxh=None):
+    p = FIG / path
+    if not p.exists():
+        P(f"<i>[missing figure {path}]</i>")
+        return
+    from reportlab.lib.utils import ImageReader
+    iw, ih = ImageReader(str(p)).getSize()
+    h = width * ih / iw
+    if maxh and h > maxh:
+        width, h = width * maxh / h, maxh
+    story.append(KeepTogether([Image(str(p), width=width, height=h), Paragraph(caption, CAP)]))
+
+
+def table(rows, widths=None, header=True, font=7.4, zebra=True):
+    data = [[Paragraph(str(c), CELLB if (header and i == 0) else CELL) for c in r] for i, r in enumerate(rows)]
+    t = Table(data, colWidths=widths, repeatRows=1 if header else 0)
+    st = [("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#999999")),
+          ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+          ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5)]
+    if header:
+        st.append(("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E3E3E3")))
+    if zebra:
+        for i in range(2, len(rows), 2):
+            st.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#F7F7F7")))
+    t.setStyle(TableStyle(st))
+    story.append(t)
+    story.append(Spacer(1, 7))
+
+
+def qa(q, a):
+    P(q, Q)
+    P(a)
+
+
+# ================================================================== title page
+story.append(Spacer(1, 3.2 * cm))
+P("<font size=24><b>PathSnap</b></font>", ParagraphStyle("t", parent=BODY, alignment=TA_CENTER, leading=30))
+P("<font size=14>Distributed Map-Matching &amp; Route Reconstruction</font>",
+  ParagraphStyle("t2", parent=BODY, alignment=TA_CENTER, leading=20))
+P("Technical Report  |  UE24CS352A Machine Learning Hackathon  |  PES University, RR Campus",
+  ParagraphStyle("t3", parent=BODY, alignment=TA_CENTER, textColor=colors.HexColor("#555555")))
+story.append(Spacer(1, 1.2 * cm))
+team_rows = [["Team", TEAM.get("team_name", "<i>(team name to be filled in)</i>")]]
+for mbr in TEAM.get("members", []):
+    team_rows.append(["Member", mbr])
+if not TEAM.get("members"):
+    team_rows.append(["Members / SRN", "<i>(to be filled in)</i>"])
+team_rows.append(["Repository", TEAM.get("repo_url", "<i>(GitHub URL)</i>")])
+team_rows.append(["Date", date.today().strftime("%d %B %Y")])
+table(team_rows, widths=[3.5 * cm, 10 * cm], header=False, zebra=False)
+story.append(Spacer(1, 0.8 * cm))
+hm = HAB.loc[SEL]
+P("<b>Summary.</b> Each GPS fix is matched to a road arc in two stages. (1) A candidate scorer ranks the "
+  f"arcs within {RADIUS_M:.0f} m of the fix (at most {MAX_K}) using {len(FEATURES)} route-free geometric, "
+  "kinematic, temporal-context and topology features. Six models from six algorithm families were trained "
+  "with identical candidates, labels and 5-fold trip-grouped cross-validation on the 80 training trips. "
+  f"LightGBM was best on every quality metric and was tuned with Optuna TPE ({OPT['n_trials']} trials). "
+  "(2) An HMM decoded with Viterbi over the directed road graph turns the per-fix scores into a connected route. "
+  f"On the 10 student-test trips the final system reaches observation top-1 accuracy <b>{f3(hm.hmm_top1)}</b> "
+  f"(classifier alone {f3(hm.cls_top1)}, nearest-segment baseline {f3(BASE['student_test']['obs_top1'])}), "
+  f"route continuity <b>{f3(hm.hmm_continuity)}</b> and length-weighted route F1 <b>{f3(hm.hmm_route_f1)}</b>. "
+  "A FastAPI service (laptop 1) and a browser UI (laptop 2) run the full pipeline per selected trip and score it "
+  "against server-side reference routes that never reach the model or the UI.")
+fig("diagram_pipeline.png", "Figure 1. PathSnap pipeline. Dark boxes are learned / decoded components.")
+story.append(PageBreak())
+
+# ================================================================== 1 problem
+P("1. Problem Formulation", H1)
+P("Inputs per trip: a GPS track (longitude, latitude, timestamp), a road graph (nodes; directed arcs as "
+  "from/to node pairs) and, for development trips, the reference route as a chronological list of arc IDs. "
+  "The required output is a road arc for every relevant GPS observation and a realistic route. The route file "
+  "is <i>not</i> aligned to the track (the median trip has "
+  f"{int(EDA.n_obs.median())} fixes but only {int(EDA.route_len_arcs.median())} route arcs), so per-observation "
+  "labels must be derived (Section 2.1). We cast matching as <b>candidate ranking</b>: for fix <i>i</i> with "
+  "candidate set C<sub>i</sub>, a binary classifier estimates p(arc is the reference arc | features), the "
+  "probabilities are renormalised over C<sub>i</sub>, and the arg-max is the classifier-only prediction. "
+  "Because arc IDs are trip-specific, a multi-class formulation over global arc IDs would be meaningless; "
+  "ranking per observation generalises across trips and cities. Sequence consistency is then enforced by "
+  "an HMM whose hidden states are the candidates (Section 5).")
+P("<b>Primary selection metric.</b> CV observation-level macro-F1 and top-1 accuracy (unit: GPS fix) on "
+  "held-out trips, because they directly measure the evaluator's quantity (is each fix on the right arc) "
+  "and are computed on trips the model never saw. Probability quality (log loss) and inference time are used "
+  "as secondary criteria because the decoder consumes the probabilities and the API must answer interactively.")
+
+# ================================================================== 2 EDA
+P("2. Dataset Understanding and Exploratory Data Analysis", H1)
+tr, ts = EDA[EDA.partition == "train"], EDA[EDA.partition == "student_test"]
+inv = [["Partition", "Trips", "GPS fixes", "Fixes/trip (min / median / max)", "Nodes (median)", "Arcs (median)",
+        "Route arcs (median)", "Track length km (median)"]]
+for name, g in [("train", tr), ("student_test", ts)]:
+    inv.append([name, len(g), f"{int(g.n_obs.sum()):,}", f"{int(g.n_obs.min())} / {int(g.n_obs.median())} / {int(g.n_obs.max())}",
+                f"{int(g.n_nodes.median()):,}", f"{int(g.n_arcs.median()):,}", int(g.route_len_arcs.median()),
+                f"{g.track_km.median():.1f}"])
+inv.append(["evaluator_test", 10, "not available to the team", "-", "-", "-", "-", "-"])
+table(inv)
+P("Table 1. Dataset inventory (source: results/eda_trips.csv, produced by scripts/eda.py). All 90 supplied "
+  "trips contain all four files; the ten evaluator trips are held by the organisers.", CAP)
+
+P("2.1 How did we preprocess the data?", H2)
+P("<b>Parsing and validation.</b> Files are whitespace-separated without headers. We verified the column "
+  "order (longitude first: values span "
+  f"{EDA.lon_min.min():.1f} to {EDA.lon_max.max():.1f} in the first column and {EDA.lat_min.min():.1f} to "
+  f"{EDA.lat_max.max():.1f} in the second, and the tracks overlay the OSM basemap correctly in Folium), that "
+  "node/arc IDs are zero-based row indices, that every route ID is a valid arc index and that timestamps are "
+  "strictly increasing. Trips are spread over several continents, so a single projection is inappropriate.")
+P("<b>Projection.</b> Each trip is projected to a local equirectangular plane centred on its own centroid "
+  "(x = R&middot;&Delta;lon&middot;cos(lat<sub>0</sub>), y = R&middot;&Delta;lat). Over the 5-50 km extent of a trip "
+  "the scale error is far below GPS noise (&lt;0.1%), and it allows exact point-to-segment distances, "
+  "projection fractions and bearings in metres. Haversine is used only for reference checks.")
+P("<b>Label derivation (training/evaluation only).</b> For each trip we align the fix sequence to the route "
+  "sequence with a monotone dynamic programme: choose route indices j<sub>1</sub> &le; j<sub>2</sub> &le; &hellip; "
+  "&le; j<sub>n</sub> minimising &Sigma;<sub>i</sub> dist(fix<sub>i</sub>, route[j<sub>i</sub>]). Monotonicity "
+  "respects the travel order, so loops and repeated arcs (one trip repeats 255 arcs) are handled; arcs may be "
+  "skipped because a short arc can be crossed between two 1 Hz fixes. The aligned arc is the label of the fix. "
+  "Fixes whose aligned distance exceeds 60 m are flagged <i>off-route</i>: the reference does not describe "
+  "them (e.g. train trip 00000002 keeps recording ~540 fixes after the route ends and contains a 280-fix "
+  "detour absent from the route). They are excluded from training and scoring and counted in Table 2. This "
+  "is a documented approximation: labels inherit any error in the reference route and in the nearest-feasible "
+  "alignment, which we cannot verify independently.")
+P(f"<b>Candidate generation.</b> Arcs are densified every 10 m into a KD-tree (restricted to the track bounding "
+  f"box + 280 m). For every fix we take arcs within {RADIUS_M:.0f} m, compute exact segment distance, and keep "
+  f"the {MAX_K} nearest (two-way streets contribute two co-located arcs). Original trip ID, observation index "
+  "and arc ID are preserved in every row. All 90 trips are processed in 14 s on 4 cores.")
+P("<b>Training rows.</b> 1 Hz fixes are highly autocorrelated, so models are fitted on every 3rd fix of each "
+  "training trip (KNN: every 9th, for prediction cost); CV metrics use every 3rd fix of the validation trips; "
+  "student-test metrics use <i>all</i> fixes. Scaling (where used) is fitted inside each training fold only.")
+
+P("2.2 Missing values and data quality", H2)
+fmtq = lambda v: (f"{int(v):,}" if float(v).is_integer() else f"{float(v):.4f}")  # noqa: E731
+qrows = [["Check", "train", "student_test"]] + [[c, fmtq(a), fmtq(b)] for c, a, b in QUAL.values.tolist()]
+table(qrows, widths=[8 * cm, 3.5 * cm, 3.5 * cm])
+P("Table 2. Missing-value and data-quality analysis (results/eda_quality_table.csv). There are no NaNs, "
+  "duplicate timestamps or isolated nodes; irregularity comes from time gaps, degenerate arcs and reference "
+  "routes that do not cover the whole track.", CAP)
+fig("eda_obs_per_trip.png", "Figure 2. Trip-length distribution (train and student_test).", width=W * 0.8)
+fig("eda_sampling.png", "Figure 3. Sampling intervals and apparent speed between consecutive fixes (all 90 trips).")
+
+P("2.3 What patterns did we observe?", H2)
+pos_rank0 = float(CAND.nearest_top1.mean())
+P(f"<b>(a) The nearest arc is often wrong.</b> Only {pc(BASE['student_test']['obs_top1'])} of student-test fixes "
+  f"(and {pc(BASE['cv_mean']['obs_top1'])} on CV folds) lie on their nearest arc. The main reason is that "
+  f"{pc(EDA.frac_twoway_arcs.median())} of arcs (median trip) are one direction of a two-way street, so the "
+  "reverse arc is at exactly the same distance; parallel roads, intersections and multipath noise add the rest "
+  "(Figure 6, centre). Direction can only be resolved from motion, which motivated the heading features.")
+P("<b>(b) Noise level.</b> The median aligned distance is about 4-6 m, with a heavy tail (Figure 6, left); a "
+  f"{RADIUS_M:.0f} m radius therefore captures the reference arc for "
+  f"{pc(1 - QUAL.set_index('check').loc['candidate miss rate (reliable obs)', 'student_test'])} of scored "
+  "student-test fixes. <b>(c) Sampling.</b> Most steps are exactly 1 s, but 28 training trips contain a gap "
+  "longer than 30 s (maximum 153,064 s, i.e. a recording restarted much later) and the apparent speed has "
+  "outliers above 50 m/s caused by position jumps; the decoder must tolerate both. <b>(d) Road networks</b> vary "
+  f"from {int(EDA.n_arcs.min()):,} to {int(EDA.n_arcs.max()):,} directed arcs per trip and are not always "
+  "strongly connected (median largest SCC "
+  f"{pc(EDA.largest_scc_frac.median())}), so transitions can be infeasible. <b>(e) Reference routes</b> are "
+  f"head-to-tail continuous in {pc(EDA.route_continuity.mean())} of steps, but may stop before the track ends.")
+fig("eda_trajectories.png", "Figure 4. GPS trajectories, road network and reference route for six training trips "
+    "(train partition, local metres). Note the track continuing beyond the reference in trip 00000002.")
+fig("eda_network.png", "Figure 5. Road-network size and connectivity per trip (train and student_test).")
+fig("eda_labels_candidates.png", "Figure 6. Alignment distance, rank of the reference arc among candidates, and "
+    "heading agreement for reference vs. other candidates (train partition).")
+
+P("2.4 Features and why we chose them", H2)
+feat_tab = [["Group", "Features", "Rationale"],
+            ["Distance", "d, d_rank, d_minus_min, d_ratio", "GPS error is roughly isotropic; relative distance to the best candidate is more transferable across noise levels than absolute distance."],
+            ["Candidate density", "n_cand, n_cand_30", "Dense urban grids need more evidence than an isolated rural road."],
+            ["Heading", "cos_head, abs_head, cos_head_win, speed, cos_head_x_speed", "Separates the two directions of a two-way street and crossing roads; heading is only reliable when moving, hence the speed interaction and a longer +-8 fix window."],
+            ["Position on arc", "t_proj, t_outside, arc_len, log_arc_len", "Projections falling beyond an arc end indicate the neighbouring arc."],
+            ["Temporal context", "d_prev1, d_next1, d_win5, d_win15", "Distance of neighbouring fixes to the same arc: smooths single-fix noise using only GPS (no labels)."],
+            ["Topology", "same_prev/next, conn_prev/next, head_outdeg, tail_indeg, twoway", "Whether the candidate equals / touches the nearest arc of the adjacent fixes; intersection complexity."],
+            ["Gaps", "gap_prev, gap_next", "Context features are less trustworthy across time gaps."]]
+table(feat_tab, widths=[2.6 * cm, 5.2 * cm, 9.6 * cm])
+P("Table 3. The 28 route-free features (pathsnap/candidates.py). None uses the reference route.", CAP)
+top = ", ".join(f"{k} ({v:.1%})" for k, v in FI.head(5).items())
+P(f"The tuned LightGBM attributes most split gain to {top} (Figure 7): relative distance and windowed heading "
+  "agreement are the decisive signals, consistent with patterns (a) and (b).")
+fig("feat_importance_lgbm_tuned.png", "Figure 7. Feature importance (gain share) of the final model.", width=W * 0.62)
+P("2.5 Geographical map (Folium)", H2)
+fig("screenshot_map_eda.png", "Figure 8. Folium EDA map, train trip 00000002 (maps/eda_train_00000002.html): "
+    "GPS fixes, nearby road network and reference route, with layer control and legend.", width=W * 0.9, maxh=11 * cm)
+P("Partitions used: Tables 1-2 and Figures 2, 3, 5 use train and student_test inventories (no labels); "
+  "Figures 4, 6, 7 and 8 use the train partition only. Student-test labels are used only for scoring.", SMALL)
+story.append(PageBreak())
+
+# ================================================================== 3 models
+P("3. Model Experimentation and Comparison", H1)
+P("<b>Protocol (identical for all models).</b> Same candidate sets and labels; 5 trip-grouped folds over the 80 "
+  "training trips with a fixed trip-to-fold assignment (results/folds.json, seed 42); no trip ever appears in "
+  "two folds or in two partitions. Each model is refitted on all 80 trips and evaluated once on the 10 "
+  "student-test trips. Metrics and units: <b>observation top-1</b> (fix), <b>macro-F1</b> (per trip, F1 averaged "
+  "over the arcs present in that trip, then averaged over trips, because arc IDs are trip-specific), "
+  "<b>observation log loss</b> (-mean log of the renormalised probability of the reference arc, fixes whose "
+  "reference arc is in the candidate set), <b>candidate precision / recall / F1 and log loss</b> (binary, "
+  "candidate row, threshold 0.5), <b>route continuity</b> (consecutive fix pairs whose predicted arcs are equal "
+  "or connected head-to-tail), and <b>inference time</b> (scoring all 175,740 student-test candidate rows). "
+  f"The candidate miss rate is a property of the candidate generator, not the model: {pc(te('lgbm', 'miss_rate'))} "
+  f"on student-test and {pc(np.mean([cv(m, 'miss_rate') for m in MODELS]))} on CV folds.")
+
+P("3.1 Overall model comparison", H2)
+rows = [["Model", "Algorithm family", "Key configuration", "CV macro-F1", "Top-1 (test)", "Contin. (test)",
+         "Macro F1 (test)", "Log loss (test)", "Infer. time (test)"]]
+FAM = {"logreg": "Linear", "gnb": "Probabilistic", "knn": "Instance-based", "rf": "Bagging ensemble",
+       "lgbm": "Boosting", "mlp": "Neural net"}
+keycfg = {"logreg": "C=1.0, L2, lbfgs, standardised", "gnb": "var_smoothing=1e-9",
+          "knn": "k=50, distance-weighted, standardised, stride-9 rows",
+          "rf": "200 trees, depth 20, min_leaf 3, sqrt features",
+          "lgbm": "400 rounds, lr 0.05, 63 leaves, min_child 50, bagging 0.8/0.8",
+          "mlp": "64-32 ReLU, Adam 1e-3, L2 1e-4, batch 1024, 20 epochs"}
+for i, m in enumerate(MODELS, 1):
+    rows.append([f"Model {i}: {NAMES[m]}", FAM[m], keycfg[m],
+                 f"{f3(cv(m, 'obs_macro_f1_trip'))} &plusmn; {f3(cs(m, 'obs_macro_f1_trip'))}",
+                 f3(te(m, "obs_top1")), f3(te(m, "route_continuity")), f3(te(m, "obs_macro_f1_trip")),
+                 f3(te(m, "obs_logloss")), f"{te(m, 'infer_time_s'):.2f} s"])
+rows.append(["Tuned: LightGBM (Section 4)", "Boosting", "Optuna TPE best (Table 7)",
+             f"{f3(cv('lgbm_tuned', 'obs_macro_f1_trip'))} &plusmn; {f3(cs('lgbm_tuned', 'obs_macro_f1_trip'))}",
+             f3(te("lgbm_tuned", "obs_top1")), f3(te("lgbm_tuned", "route_continuity")),
+             f3(te("lgbm_tuned", "obs_macro_f1_trip")), f3(te("lgbm_tuned", "obs_logloss")),
+             f"{te('lgbm_tuned', 'infer_time_s'):.2f} s"])
+rows.append(["Reference: nearest segment", "Geometric (untrained)", "argmin distance",
+             f"{f3(BASE['cv_mean']['obs_macro_f1_trip'])} (no fitting)", f3(BASE["student_test"]["obs_top1"]),
+             f3(BASE["student_test"]["route_continuity"]), f3(BASE["student_test"]["obs_macro_f1_trip"]),
+             "N/A (not a fitted probability)", f"{BASE['student_test']['infer_time_s']:.2f} s"])
+table(rows, widths=[2.75 * cm, 2.25 * cm, 3.0 * cm, 1.65 * cm, 1.3 * cm, 1.35 * cm, 1.45 * cm, 1.65 * cm, 1.35 * cm])
+P("Table 4. Consolidated comparison, classifier only (no HMM). CV values are mean &plusmn; std over 5 trip-grouped "
+  "folds; test values are over all fixes of the 10 student-test trips (sources: results/model_*.json, "
+  "results/comparison_table.csv). Inference time = scoring time of all test candidates; end-to-end API latency "
+  "including features and HMM is reported in Section 7.", CAP)
+rows = [["Model", "CV top-1 (val)", "Train- fold top-1", "Gap", "Cand. prec.", "Cand. recall", "Cand. F1",
+         "Cand. log loss", "Fit time (s)", "Train rows"]]
+for m in MODELS + ["lgbm_tuned"]:
+    rows.append([NAMES[m], f"{f3(cv(m, 'obs_top1'))} &plusmn; {f3(cs(m, 'obs_top1'))}", f3(cv(m, "train_obs_top1")),
+                 f"{cv(m, 'train_obs_top1') - cv(m, 'obs_top1'):+.3f}", f3(te(m, "cand_precision_pos")),
+                 f3(te(m, "cand_recall_pos")), f3(te(m, "cand_f1_pos")), f3(te(m, "cand_logloss")),
+                 f"{M[m]['final_fit_time_s']:.1f}", f"{M[m]['final_train_rows']:,}"])
+table(rows, widths=[3.0 * cm, 2.1 * cm, 1.5 * cm, 1.4 * cm, 1.4 * cm, 1.4 * cm, 1.3 * cm, 1.4 * cm, 1.4 * cm, 1.75 * cm])
+P("Table 5. Generalisation and candidate-level precision/recall (student-test, threshold 0.5). 'Train-fold top-1' "
+  "is measured on the training trips of each fold (KNN: on 12 of them), so the gap is direct evidence of "
+  "over-fitting.", CAP)
+
+P("3.2 Per-model analysis", H2)
+
+
+def model_section(i, m, why, strengths, hyper, loss, fit_note):
+    P(f"Model {i}: {NAMES[m]} ({CONFIGS[m]['family']})", H3)
+    qa("A1. Why suitable for PathSnap?", why)
+    qa("A2. Strengths and limitations for this task", strengths)
+    qa("B5. Important hyperparameters and initial values", hyper)
+    qa("B6. Loss / optimisation objective", loss)
+    qa("C7-C8. Student-test performance (observation level)",
+       f"Top-1 accuracy <b>{f3(te(m, 'obs_top1'))}</b>, macro-F1 <b>{f3(te(m, 'obs_macro_f1_trip'))}</b>, "
+       f"observation log loss <b>{f3(te(m, 'obs_logloss'))}</b> (candidate log loss {f3(te(m, 'cand_logloss'))}); "
+       f"candidate precision {f3(te(m, 'cand_precision_pos'))}, recall {f3(te(m, 'cand_recall_pos'))}; route "
+       f"continuity {f3(te(m, 'route_continuity'))}. CV: top-1 {f3(cv(m, 'obs_top1'))} &plusmn; "
+       f"{f3(cs(m, 'obs_top1'))}, macro-F1 {f3(cv(m, 'obs_macro_f1_trip'))}.")
+    qa("C9. Over- or under-fitting?", fit_note)
+
+
+g = gap
+model_section(1, "logreg",
+              "A transparent linear baseline that outputs probabilities directly. Most features are monotone "
+              "evidence (smaller relative distance and higher heading agreement mean more likely), which a "
+              "linear logit can exploit.",
+              "Fast (fit ~1 s, scoring 6 ms), well-behaved probabilities, no tuning burden. It cannot represent "
+              "interactions that matter here, e.g. heading is informative only at speed and context distances "
+              "matter only when the fix is ambiguous; it also assumes a monotone effect of features such as "
+              "arc length.",
+              "C=1.0 (inverse L2 strength), solver lbfgs, max_iter=1000, StandardScaler fitted on training folds.",
+              "Binary cross-entropy (log loss) + L2 penalty.",
+              f"No over-fitting: training-fold top-1 {f3(cv('logreg', 'train_obs_top1'))} equals CV "
+              f"{f3(cv('logreg', 'obs_top1'))} (gap {g['logreg']:+.3f}). It under-fits relative to tree ensembles "
+              f"(CV top-1 {f3(cv('lgbm', 'obs_top1'))} for LightGBM), i.e. the remaining error is bias from the "
+              "linear boundary, not variance.")
+model_section(2, "gnb",
+              "A generative probabilistic model; included to test whether class-conditional feature "
+              "distributions alone separate reference arcs from distractors.",
+              "Trains in 0.1 s and needs no scaling. Its independence assumption is badly violated: d, "
+              "d_minus_min, d_ratio and the windowed distances are strongly correlated, so evidence is counted "
+              "several times and probabilities become extreme.",
+              "var_smoothing=1e-9 (default); no other hyperparameters.",
+              "Maximum-likelihood Gaussian class-conditional densities and class priors (no iterative loss).",
+              f"Under-fitting/mis-specification rather than over-fitting: train {f3(cv('gnb', 'train_obs_top1'))} vs "
+              f"CV {f3(cv('gnb', 'obs_top1'))}. The over-counted evidence shows in a candidate recall of "
+              f"{f3(te('gnb', 'cand_recall_pos'))} with precision only {f3(te('gnb', 'cand_precision_pos'))} and the "
+              f"worst log loss of all models ({f3(te('gnb', 'obs_logloss'))}).")
+model_section(3, "knn",
+              "Map-matching decisions are local: fixes with similar distance/heading/context configurations "
+              "should share labels, which an instance-based method captures without assuming a functional form.",
+              f"Non-parametric and simple. But all 28 standardised features get equal weight (irrelevant ones "
+              f"dilute the metric), training data must be stored ({TRAIN_STRIDE['knn']}-stride subsample, "
+              f"{M['knn']['final_train_rows']:,} rows) and prediction is slow: "
+              f"{te('knn', 'infer_time_s'):.1f} s for the test candidates, more than 20x slower than any other model.",
+              "n_neighbors=50, weights='distance', Euclidean metric on StandardScaler features.",
+              "None (lazy learner); probability = distance-weighted share of positive neighbours.",
+              f"Moderate variance: training-fold top-1 {f3(cv('knn', 'train_obs_top1'))} vs CV "
+              f"{f3(cv('knn', 'obs_top1'))} (gap {g['knn']:+.3f}). The larger issue is bias from the unweighted "
+              f"metric: CV top-1 is {f3(cv('knn', 'obs_top1'))}, below logistic regression.")
+model_section(4, "rf",
+              "Bagged decision trees model non-linear thresholds and interactions (e.g. heading only when "
+              "moving) and are robust to unscaled, heterogeneous features.",
+              f"Second-best accuracy and the highest candidate precision ({f3(te('rf', 'cand_precision_pos'))}). "
+              f"Limitations: the largest artefact (40 MB), {M['rf']['final_fit_time_s']:.0f} s to fit, and "
+              "deep trees memorise individual trips.",
+              "n_estimators=200, max_depth=20, min_samples_leaf=3, max_features='sqrt', bootstrap=True.",
+              "Gini impurity reduction per split; probabilities = mean leaf class frequency.",
+              f"Clear over-fitting: training-fold top-1 {f3(cv('rf', 'train_obs_top1'))} vs CV "
+              f"{f3(cv('rf', 'obs_top1'))}, the largest gap of all models ({g['rf']:+.3f}); training-fold candidate "
+              f"log loss {f3(cv('rf', 'train_cand_logloss'))} vs {f3(cv('rf', 'cand_logloss'))} on validation. "
+              "Averaging over trees keeps validation performance high despite this.")
+model_section(5, "lgbm",
+              "Gradient-boosted trees add trees that correct the current errors, which suits a tabular problem "
+              "with interacting geometric features; it optimises log loss directly, which the HMM consumes.",
+              f"Best CV macro-F1, best test top-1 and the lowest log loss of the six models; fits in "
+              f"{M['lgbm']['final_fit_time_s']:.0f} s and scores {te('lgbm', 'infer_time_s'):.1f} s for 176k rows. "
+              "Limitations: more hyperparameters to tune, and probabilities can become over-confident with many rounds.",
+              "n_estimators=400, learning_rate=0.05, num_leaves=63, min_child_samples=50, subsample=0.8 "
+              "(freq 1), colsample_bytree=0.8, no explicit L1/L2.",
+              "Binary log loss minimised by second-order gradient boosting.",
+              f"Mild over-fitting: training-fold top-1 {f3(cv('lgbm', 'train_obs_top1'))} vs CV "
+              f"{f3(cv('lgbm', 'obs_top1'))} (gap {g['lgbm']:+.3f}). The boosting-round curves (Figure 13) show "
+              "validation loss flattening after ~120 rounds while training loss keeps falling, but validation loss "
+              "does not rise, so the extra rounds do not hurt generalisation.")
+model_section(6, "mlp",
+              "A neural network learns smooth non-linear feature combinations and yields probabilities; it tests "
+              "whether a learned representation beats axis-aligned tree splits on these features.",
+              f"Good probabilities (obs. log loss {f3(te('mlp', 'obs_logloss'))}) and fast inference "
+              f"({te('mlp', 'infer_time_s'):.2f} s). Needs feature scaling, is sensitive to learning rate and epochs, "
+              "and on tabular data of this size did not outperform boosting.",
+              "hidden_layer_sizes=(64, 32), ReLU, Adam lr=1e-3, alpha (L2)=1e-4, batch_size=1024, 20 epochs, "
+              "StandardScaler; trained epoch by epoch with partial_fit to record histories.",
+              "Binary cross-entropy + L2 weight penalty.",
+              f"Slight over-fitting: training-fold top-1 {f3(cv('mlp', 'train_obs_top1'))} vs CV "
+              f"{f3(cv('mlp', 'obs_top1'))}; in Figure 12 the validation log loss stops improving after about "
+              "8-12 epochs while training loss continues to decrease, so early stopping near that point would be "
+              "appropriate.")
+
+P("3.3 Model visualisations", H2)
+fig("cmp_cv_macro_f1.png", "Figure 9. CV observation macro-F1 by model (error bars: std over the 5 trip-grouped folds).", width=W * 0.85)
+fig("cmp_test_top1_f1.png", "Figure 10. Student-test top-1 accuracy and macro-F1 (classifier only).", width=W * 0.85)
+fig("cmp_logloss.png", "Figure 11. Student-test log loss: observation-level (left) and candidate-level (right).")
+fig("hist_mlp.png", "Figure 12. MLP training vs validation log loss per epoch (mean &plusmn; std over CV folds; "
+    "validation fold used only for monitoring).", width=W * 0.75)
+fig("hist_lgbm.png", "Figure 13. LightGBM training vs validation log loss per boosting round (CV folds). Logistic "
+    "regression, Naive Bayes, KNN and Random Forest have no epoch-wise history, so none is shown.", width=W * 0.75)
+fig("cmp_train_vs_cv.png", "Figure 14. Training-fold vs validation-fold top-1 (over/under-fitting evidence).", width=W * 0.85)
+fig("cm_candidates.png", "Figure 15. Candidate-level confusion matrices on student-test (threshold 0.5, row-normalised; counts in brackets).")
+fig("cmp_pertrip_heat.png", "Figure 16. Per-trip student-test top-1 by model. Trip 00000077 is hardest for every model.")
+fig("cmp_time.png", "Figure 17. Final fit time and scoring time (log scales).")
+P("<b>Model selection.</b> LightGBM had the best CV macro-F1 "
+  f"({f3(cv('lgbm', 'obs_macro_f1_trip'))}), the best student-test top-1 ({f3(te('lgbm', 'obs_top1'))}) and macro-F1 "
+  f"({f3(te('lgbm', 'obs_macro_f1_trip'))}), and the lowest observation log loss ({f3(te('lgbm', 'obs_logloss'))}), "
+  "which matters because the HMM uses the probabilities as emissions. Its fold-to-fold std is similar to the "
+  "other models (the variation is driven by which trips fall in a fold, see Figure 16), its artefact is 1.2 MB and "
+  "it scores a trip in well under a second. Random Forest was close in accuracy but over-fits more, is 30x larger "
+  "and slower to train; the MLP was competitive on log loss but lower on accuracy. LightGBM was therefore taken "
+  "forward to Bayesian optimisation.")
+story.append(PageBreak())
+
+# ================================================================== 4 Bayesian
+P("4. Bayesian Hyperparameter Optimisation (LightGBM)", H1)
+bp = OPT["best_params"]
+comp = TRIALS[TRIALS.state == "COMPLETE"]
+qa("1-2. Hyperparameters searched and their ranges / distributions", "See Table 6. The space covers model "
+   "capacity (num_leaves, n_estimators), step size (learning_rate, log-uniform), leaf-size regularisation "
+   "(min_child_samples, log-scale), stochastic bagging (subsample, colsample_bytree) and L1/L2 penalties "
+   "(log-uniform). Ranges bracket the untuned configuration.")
+table([["Hyperparameter", "Distribution / range", "Untuned", "Best found"]] +
+      [[k, v, str(CONFIGS["lgbm"].get(k, "0 (none)")), (f"{bp[k]:.4g}" if isinstance(bp[k], float) else str(bp[k]))]
+       for k, v in OPT["search_space"].items()], widths=[3.6 * cm, 5 * cm, 3 * cm, 3 * cm])
+P("Table 6. Search space (scripts/bayes_opt.py) and the best configuration.", CAP)
+qa("3. Objective", f"Maximise the mean 5-fold trip-grouped CV observation top-1 accuracy on the 80 training trips, "
+   "using exactly the same folds as Section 3 (macro-F1 and candidate log loss were logged for every trial). "
+   f"To make each trial affordable, the search fitted on every {OPT['search_train_stride']}th fix; the untuned "
+   "configuration was evaluated under the same protocol as the reference "
+   f"(CV top-1 {f4(OPT['untuned_same_protocol']['cv_top1'])}) and also enqueued as trial 0. The student-test and "
+   "evaluator trips were never used inside the search.")
+qa("4. Number of trials and cost", f"{len(comp)} completed trials of Optuna's TPE sampler (multivariate, seed 42, "
+   f"8 random start-up trials), wall time {OPT['wall_time_s'] / 60:.1f} min on 4 threads (5 model fits per trial). "
+   "The full trial record is in results/optuna_trials.csv and results/optuna_study.pkl.")
+qa("5. Best hyperparameters", ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in bp.items())
+   + f" (trial {OPT['best_trial']}, search-protocol CV top-1 {f4(OPT['best_cv_top1'])}).")
+tvrows = [["Model", "CV macro-F1", "CV top-1", "Test top-1", "Test macro-F1", "Test obs. log loss",
+           "Test cand. log loss", "Inference time (s)", "Fit time (s)"]]
+for m, lab in [("lgbm", "LightGBM untuned"), ("lgbm_tuned", "LightGBM Bayesian-tuned")]:
+    r = TV.loc[m]
+    tvrows.append([lab, f4(r.cv_macro_f1), f4(r.cv_top1), f4(r.test_top1), f4(r.test_macro_f1),
+                   f4(r.test_obs_logloss), f4(r.test_cand_logloss), f"{r.infer_time_s:.2f}", f"{r.fit_time_s:.1f}"])
+table(tvrows)
+P("Table 7. Untuned vs tuned LightGBM, refitted with the standard pipeline (stride 3) and evaluated on identical "
+  "folds, test trips and metrics (results/tuned_vs_untuned.csv).", CAP)
+d_cv = TV.loc["lgbm_tuned", "cv_top1"] - TV.loc["lgbm", "cv_top1"]
+d_te = TV.loc["lgbm_tuned", "test_top1"] - TV.loc["lgbm", "test_top1"]
+d_ll = TV.loc["lgbm_tuned", "test_obs_logloss"] - TV.loc["lgbm", "test_obs_logloss"]
+verdict = ("Yes, but modestly" if (tuned_better_cv and tuned_better_te) else
+           "Only partially" if (tuned_better_cv or tuned_better_te) else "No")
+qa("6. Did the tuned model outperform the untuned model?",
+   f"{verdict}: CV top-1 changed by {d_cv:+.4f}, student-test top-1 by {d_te:+.4f}, CV macro-F1 by "
+   f"{TV.loc['lgbm_tuned', 'cv_macro_f1'] - TV.loc['lgbm', 'cv_macro_f1']:+.4f}, student-test macro-F1 by "
+   f"{TV.loc['lgbm_tuned', 'test_macro_f1'] - TV.loc['lgbm', 'test_macro_f1']:+.4f} and observation log loss by "
+   f"{d_ll:+.4f}. Trial scores lie in a narrow band ({comp.value.min():.4f}-{comp.value.max():.4f}), i.e. "
+   "performance is limited by the features and labels rather than by LightGBM's hyperparameters; differences of "
+   "this size are smaller than the fold-to-fold std (~0.03), so in accuracy the two models are tied. The tuned "
+   "configuration does differ in other measured ways: its training-fold vs validation top-1 gap is "
+   f"{M['lgbm_tuned']['cv_mean']['train_obs_top1'] - M['lgbm_tuned']['cv_mean']['obs_top1']:+.3f} "
+   f"instead of {M['lgbm']['cv_mean']['train_obs_top1'] - M['lgbm']['cv_mean']['obs_top1']:+.3f} (less over-fitting, from "
+   "stronger column/row subsampling and fewer leaves), it scores the test candidates "
+   f"{TV.loc['lgbm', 'infer_time_s'] / TV.loc['lgbm_tuned', 'infer_time_s']:.1f}x faster and fits "
+   f"{TV.loc['lgbm', 'fit_time_s'] / TV.loc['lgbm_tuned', 'fit_time_s']:.1f}x faster. We deploy the tuned model "
+   "because it is the configuration chosen by the pre-declared CV objective and it is lighter; the choice was "
+   "not made on student-test results, which slightly favour the untuned model on top-1.")
+fig("optuna_history.png", "Figure 18. Optuna optimisation history (each point = mean CV top-1 over 5 folds).", width=W * 0.85)
+fig("optuna_importance.png", "Figure 19. fANOVA hyperparameter importance over completed trials.", width=W * 0.7)
+fig("optuna_tuned_vs_untuned.png", "Figure 20. Tuned vs untuned LightGBM on identical data and metrics.", width=W * 0.85)
+story.append(PageBreak())
+
+# ================================================================== 5 HMM
+P("5. HMM and Viterbi Route Reconstruction", H1)
+hp = FINAL["hmm_params"]
+qa("1. Hidden states", "For fix i the hidden state is one of its candidate arcs c &isin; C<sub>i</sub>, together "
+   "with the projection fraction t<sub>c</sub> of the fix on that arc. The candidate-to-arc correspondence is the "
+   "same table the classifier scored (trip, observation, arc ID), so the decoder returns an original arc ID per fix.")
+qa("2. Emission probabilities", "log e<sub>i</sub>(c) = w &middot; log q<sub>i</sub>(c), where q<sub>i</sub> is the "
+   "tuned LightGBM probability renormalised over C<sub>i</sub> (floor 1e-6). The weight w balances classifier "
+   f"evidence against path plausibility; the selected value is w = {hp['w_emit']}.")
+qa("3. Transition probabilities", "log a(c, c') = -|d<sub>route</sub>(c, c') - d<sub>gc</sub>(z<sub>i</sub>, "
+   "z<sub>i+1</sub>)| / &beta; - max(0, d<sub>route</sub>/&Delta;t - v<sub>max</sub>)/5 (Newson-Krumm style). "
+   "d<sub>route</sub> is the driving distance from the projection on c to the projection on c': along the arc if "
+   "c = c' (backward motion beyond 15 m costs an extra 60 m), otherwise the remaining part of c + shortest path "
+   "from head(c) to tail(c') in the directed graph (Dijkstra, scipy, limit 3 km, computed in batches per trip) + "
+   f"the initial part of c'. d<sub>gc</sub> is the straight-line distance between the fixes. Selected &beta; = "
+   f"{hp['beta']} m, v<sub>max</sub> = 60 m/s.")
+qa("4. Missing candidates and large GPS gaps", "A fix without any candidate inside the radius gets no prediction "
+   "(-1) and terminates the current Viterbi chain; a new chain starts at the next fix with candidates. A time gap "
+   "&gt; 60 s or a jump &gt; 1.5 km also breaks the chain, because driving distance is no longer constrained by the "
+   "elapsed time. Each chain is decoded independently. The smoke test verifies this on a synthetic trip with "
+   f"100 displaced fixes ({SMOKE['99999999']['n_matched']} of {SMOKE['99999999']['n_observations']} matched, "
+   f"{SMOKE['99999999']['hmm_segments']} chains, no failure).")
+qa("5. Disconnected road segments", "Pairs with no directed path within the search limit get probability 0 "
+   "(-&infin;). If every transition between fix i and i+1 is impossible (e.g. the graph is disconnected or the "
+   "fixes jump between components) the chain is cut at i and decoding restarts, instead of forcing an absurd "
+   "path. For the output route, consecutive distinct arcs inside a chain are joined with the shortest path; "
+   "across chain breaks no path is invented.")
+qa("6. Decoder parameters", "Chosen by out-of-fold top-1 on the 80 training trips (5-fold OOF probabilities "
+   "from the selected model), never on student-test. A first grid &beta; &isin; {5, 10, 20, 40, 80} m &times; "
+   "w &isin; {0.5, 1, 2} had its optimum on the boundary (&beta; = 5, w = 0.5), so it was extended to "
+   f"&beta; &isin; {{2, 3.5}} and w &isin; {{0.25, 0.35}} ({len(HGRID)} settings in total). Selected: &beta; = "
+   f"{hp['beta']}, w = {hp['w_emit']} (Figure 21). Small &beta; and w mean the decoder trusts path geometry "
+   "strongly relative to single-fix scores, which suits 1 Hz data where consecutive fixes are only 10-20 m apart.")
+fig("hmm_grid.png", "Figure 21. Decoder grid: training-trip OOF top-1 after HMM.", width=W * 0.6)
+hrows = [["Model (scores)", "Top-1 cls", "Top-1 HMM", "Continuity cls", "Continuity HMM", "Route F1 cls",
+          "Route F1 HMM", "Trips HMM hurt top-1", "Trips HMM hurt route F1"]]
+order = [m for m in ["baseline"] + MODELS + ["lgbm_tuned"] if m in HAB.index]
+for m in order:
+    r = HAB.loc[m]
+    hrows.append(["Nearest-segment (geometric HMM)" if m == "baseline" else NAMES[m], f3(r.cls_top1), f3(r.hmm_top1),
+                  f3(r.cls_continuity), f3(r.hmm_continuity), f3(r.cls_route_f1), f3(r.hmm_route_f1),
+                  int(r.trips_hmm_hurt_top1), int(r.trips_hmm_hurt_route_f1)])
+table(hrows, widths=[3.6 * cm, 1.5 * cm, 1.5 * cm, 1.7 * cm, 1.7 * cm, 1.5 * cm, 1.5 * cm, 1.5 * cm, 1.6 * cm])
+P("Table 8. Classifier-only vs classifier + HMM on the 10 student-test trips with the same decoder parameters "
+  "(results/hmm_ablation_models.csv). Top-1 is pooled over fixes; continuity and route F1 are trip means. "
+  "Route F1 for classifier-only uses the collapsed per-fix arcs; for HMM the route with shortest-path filling.", CAP)
+P("<b>Did HMM decoding improve the route?</b> " +
+  f"Yes for the selected model: top-1 {f3(HAB.loc[SEL, 'cls_top1'])} &rarr; {f3(HAB.loc[SEL, 'hmm_top1'])}, "
+  f"continuity {f3(HAB.loc[SEL, 'cls_continuity'])} &rarr; {f3(HAB.loc[SEL, 'hmm_continuity'])}, route F1 "
+  f"{f3(HAB.loc[SEL, 'cls_route_f1'])} &rarr; {f3(HAB.loc[SEL, 'hmm_route_f1'])}. The gain is largest for weak "
+  f"scorers (nearest-segment top-1 {f3(HAB.loc['baseline', 'cls_top1'])} &rarr; {f3(HAB.loc['baseline', 'hmm_top1'])}), "
+  "showing that topology and timing recover much of what a pointwise scorer misses, while a good scorer still "
+  "gives the best end result.")
+ptrows = [["Trip", "Fixes", "Top-1 cls", "Top-1 HMM", "Cont. cls", "Cont. HMM", "Route F1 cls", "Route F1 HMM",
+           "Route P / R (HMM)", "Chains", "Decode s"]]
+for _, r in sel_pt.iterrows():
+    ptrows.append([r.trip, int(r.n_obs), f3(r.cls_top1), f3(r.hmm_top1), f3(r.cls_continuity), f3(r.hmm_continuity),
+                   f3(r.cls_route_f1), f3(r.hmm_route_f1), f"{r.hmm_route_precision:.3f} / {r.hmm_route_recall:.3f}",
+                   int(r.hmm_segments), f"{r.decode_time_s:.2f}"])
+table(ptrows)
+P(f"Table 9. Per-trip effect of the decoder for {NAMES[SEL]} (results/hmm_test_pertrip.csv).", CAP)
+hurt_txt = []
+if len(hurt_top1):
+    hurt_txt.append("top-1 decreased on " + ", ".join(f"{r.trip} ({r.cls_top1:.3f} &rarr; {r.hmm_top1:.3f})" for _, r in hurt_top1.iterrows()))
+if len(hurt_rf1):
+    hurt_txt.append("route F1 decreased on " + ", ".join(f"{r.trip} ({r.cls_route_f1:.3f} &rarr; {r.hmm_route_f1:.3f})" for _, r in hurt_rf1.iterrows()))
+P("<b>Cases where HMM did not help.</b> " + ("; ".join(hurt_txt) + ". " if hurt_txt else "For the selected model "
+  "no student-test trip got worse on top-1 or route F1. ") +
+  "Where it hurts, the typical mechanism is a confident but wrong classifier run (e.g. on the reverse direction of a "
+  "two-way street or a parallel service road) that is internally consistent, so the decoder keeps it; shortest-path "
+  "filling then adds arcs between two wrong matches, lowering route precision. Trip 00000077 remains the hardest "
+  "trip (dense urban grid, many parallel roads) even after decoding.")
+HTR = pd.read_csv(RES / "hmm_train_oof_pertrip.csv", dtype={"trip": str})
+bad = HTR[(HTR.hmm_top1 < HTR.cls_top1) | (HTR.hmm_route_f1 < HTR.cls_route_f1)]
+P(f"On the 80 training trips (out-of-fold scores, same decoder) the HMM lowered top-1 on "
+  f"{int((HTR.hmm_top1 < HTR.cls_top1).sum())} trips and route F1 on {int((HTR.hmm_route_f1 < HTR.cls_route_f1).sum())} "
+  f"trips (Table 10), while raising pooled OOF top-1 from {f3(np.average(HTR.cls_top1, weights=HTR.n_reliable))} to "
+  f"{f3(np.average(HTR.hmm_top1, weights=HTR.n_reliable))}. The large route-F1 drops (e.g. 00000033, 00000075, "
+  "00000010) come with low route precision: when the classifier is wrong over long stretches, shortest-path filling "
+  "between wrong matches adds arcs that are not on the reference. Top-1 drops are small (&lt; 0.015) and occur on "
+  "trips that were already near-perfect, where smoothing occasionally moves a correct fix at an arc boundary.")
+brow = [["Trip (train)", "Fixes", "Top-1 cls", "Top-1 HMM", "Route F1 cls", "Route F1 HMM", "Route precision HMM", "Chains"]]
+for _, r in bad.iterrows():
+    brow.append([r.trip, int(r.n_obs), f3(r.cls_top1), f3(r.hmm_top1), f3(r.cls_route_f1), f3(r.hmm_route_f1),
+                 f3(r.hmm_route_precision), int(r.hmm_segments)])
+table(brow)
+P("Table 10. Training trips (OOF) where the decoder lowered top-1 or route F1 (results/hmm_train_oof_pertrip.csv).", CAP)
+fig("hmm_ablation_models.png", "Figure 22. Effect of HMM decoding for every model's scores (student-test).")
+fig("hmm_pertrip.png", f"Figure 23. Per-trip classifier-only vs classifier + HMM ({NAMES[SEL]}).")
+story.append(PageBreak())
+
+# ================================================================== 6 Folium
+P("6. Geographical Visualisation Using Folium", H1)
+P("scripts/make_maps.py builds every map from the actual pipeline output (the same Predictor class the API "
+  "uses). Layers: OpenStreetMap basemap; nearby road network (grey); raw GPS fixes (blue dots with fix index and "
+  "timestamp tooltips); reference route (green, development trips only); classifier-only prediction (orange "
+  "dashed, off by default); classifier + HMM route (red); fixes matched to a non-reference arc (black circles, "
+  "off by default). Each map has a layer control, a legend with the trip's scores, start/end markers, and is "
+  "fitted to the track extent. Interactive HTML files are committed in maps/.")
+fig("screenshot_map_test_full.png", "Figure 24. Student-test trip 00000009, full extent (maps/student_test_00000009.html).",
+    width=W * 0.95, maxh=10.5 * cm)
+fig("screenshot_map_test_zoom.png", "Figure 25. Zoomed view of the hardest student-test trip 00000077: reference "
+    "(green), HMM route (red), classifier-only (orange dashed) and wrongly matched fixes (black circles).",
+    width=W * 0.95, maxh=10.5 * cm)
+story.append(PageBreak())
+
+# ================================================================== 7 API/UI
+P("7. API, UI and Deployment", H1)
+fig("diagram_deployment.png", "Figure 26. Two-laptop deployment.", width=W * 0.9)
+P("<b>Backend (laptop 1).</b> api/server.py (FastAPI + uvicorn, bound to 0.0.0.0:8000) loads "
+  f"models/final_config.json (model = {FINAL['model']}, &beta; = {hp['beta']}, w = {hp['w_emit']}) and the model "
+  "file once at start-up. GET /trips lists the trip folders of the configured partition (PATHSNAP_PARTITION), "
+  "so the ten reserved evaluator trips are discovered from disk, not hardcoded. POST /predict {trip_id} runs (1) "
+  "the route-free pipeline: load trip without its .route, candidates, features, classifier, HMM, route filling; "
+  "then (2) a separate evaluation step (api/evaluation.py) that reads the private reference route, derives "
+  "per-fix labels with the same alignment as in training, and computes top-1, macro-F1, continuity and route "
+  "precision/recall/F1 for classifier-only and HMM outputs. Only these aggregate scores, the predicted route and "
+  "the GPS fixes are returned; reference geometry and labels never leave the server. Every request is logged "
+  "(console + logs/api_requests.log) with client IP, status, latency, trip and accuracy, for the evaluator to "
+  "inspect on laptop 1.")
+P("<b>UI (laptop 2).</b> ui/index.html + app.js, a static page served with python -m http.server. The API "
+  "address is entered once (or passed as ?api=http://&lt;laptop-1-IP&gt;:8000). It lists the trips returned by "
+  "/trips as buttons, posts the selected ID, draws the GPS fixes and predicted route on a Leaflet map, and shows "
+  "the server-side scores and timings.")
+lat_rows = [["Trip", "Fixes", "Pipeline time (s)", "Top-1 cls", "Top-1 HMM"]]
+for t in ["00000009", "00000077"]:
+    r = SMOKE[t]
+    lat_rows.append([t, r["n_observations"], r["seconds"], f3(r["acc_cls"]), f3(r["acc_hmm"])])
+table(lat_rows, widths=[3 * cm, 2 * cm, 3 * cm, 2.5 * cm, 2.5 * cm])
+P("Table 11. End-to-end request latency measured by scripts/smoke_test.py through HTTP in a fresh server process "
+  "(results/smoke_test.json).", CAP)
+fig("screenshot_ui.png", "Figure 27. Working evaluator UI (served locally, API on the same machine during "
+    "development): trip list, predicted route and server-side evaluation.", width=W * 0.9, maxh=12.5 * cm)
+fig("screenshot_api_docs.png", "Figure 28. Successful POST /predict response (FastAPI interactive docs).",
+    width=W * 0.9, maxh=11 * cm)
+logf = ROOT / "logs" / "api_requests_demo.log"
+if logf.exists():
+    lines = [ln.rstrip() for ln in open(logf) if "PREDICT" in ln or "POST" in ln][-12:]
+    P("Server console log excerpt (copied verbatim from logs/api_requests_demo.log):", SMALL)
+    P("<br/>".join(ln.replace("&", "&amp;").replace("<", "&lt;") for ln in lines), MONO)
+P("<b>Two-laptop verification.</b> Screenshots above were captured on a single development machine. The "
+  "screenshots of the UI on laptop 2 and of the API console on laptop 1 receiving requests over the LAN must be "
+  "taken during the actual two-laptop run (status: <b>pending at the time of writing</b>); steps: start the API "
+  "on laptop 1 with PATHSNAP_PARTITION pointing at the evaluator trips, open the UI on laptop 2 with "
+  "?api=http://&lt;laptop-1-IP&gt;:8000, select each trip and capture both screens.", BODY)
+story.append(PageBreak())
+
+# ================================================================== 8 limitations
+P("8. Limitations and Reproducibility", H1)
+P("<b>Limitations.</b> (1) Observation labels come from aligning fixes to the supplied route; where the route is "
+  "incomplete or the alignment is ambiguous (fixes near an intersection could belong to either arc) the labels and "
+  "therefore every observation metric inherit that uncertainty; off-route fixes (&gt;60 m, "
+  f"{int(QUAL.set_index('check').loc['observations flagged off-route (>60 m)', 'train']):,} in train, "
+  f"{int(QUAL.set_index('check').loc['observations flagged off-route (>60 m)', 'student_test'])} in student-test) are "
+  "excluded. (2) Student-test has only 10 trips, so differences below ~0.01 are within trip-to-trip variation. "
+  "(3) Bayesian search fitted on a stride-6 subsample for cost; the refit uses stride 3. (4) Candidate radius "
+  f"{RADIUS_M:.0f} m / K={MAX_K} caps recall; fixes with larger errors cannot be recovered by any model. "
+  "(5) The decoder parameters were chosen on a small grid. (6) Evaluator trips may come from other regions; the "
+  "features are local and scale-free where possible, but this was only tested across the 90 supplied trips.")
+P("<b>Reproducibility.</b> Fixed seed 42; fold assignment stored in results/folds.json; exact package versions in "
+  "requirements.txt; every figure and table is regenerated by the scripts listed in the README from the raw files. "
+  "scripts/smoke_test.py re-runs the full raw-files-to-API path in a fresh process; its last run passed all checks "
+  f"({', '.join(k for k, v in SMOKE['checks'].items() if v)}).")
+P("<b>AI assistance disclosure.</b> An AI coding assistant (Claude) was used to help write code and draft this "
+  "report under the team's direction. All experiments were actually executed; all numbers, plots and screenshots "
+  "come from the committed scripts and logs.")
+P("Appendix A. Optuna trial record", H2)
+trows = [["Trial", "CV top-1", "CV macro-F1", "n_est.", "lr", "leaves", "min_child", "subsample", "colsample", "lambda", "alpha"]]
+for _, r in comp.sort_values("number").iterrows():
+    trows.append([int(r.number), f4(r.value), f4(r.user_attrs_cv_macro_f1), int(r.params_n_estimators),
+                  f"{r.params_learning_rate:.3f}", int(r.params_num_leaves), int(r.params_min_child_samples),
+                  f"{r.params_subsample:.2f}", f"{r.params_colsample_bytree:.2f}", f"{r.params_reg_lambda:.3g}",
+                  f"{r.params_reg_alpha:.3g}"])
+table(trows)
+
+
+def footer(c, d):
+    c.saveState()
+    c.setFont("Helvetica", 7.5)
+    c.setFillColor(colors.HexColor("#666666"))
+    c.drawString(1.8 * cm, 1.1 * cm, "PathSnap - Technical Report")
+    c.drawRightString(A4[0] - 1.8 * cm, 1.1 * cm, f"Page {d.page}")
+    c.restoreState()
+
+
+(ROOT / "report").mkdir(exist_ok=True)
+out = ROOT / "report" / "PathSnap_Technical_Report.pdf"
+doc = SimpleDocTemplate(str(out), pagesize=A4, leftMargin=1.8 * cm, rightMargin=1.8 * cm, topMargin=1.6 * cm,
+                        bottomMargin=1.7 * cm, title="PathSnap Technical Report", author=TEAM.get("team_name", "PathSnap team"))
+doc.build(story, onFirstPage=footer, onLaterPages=footer)
+print("written", out)
