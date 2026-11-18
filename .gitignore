@@ -16,3 +16,5 @@ Student folder/
 *.route
 .env
 deck/node_modules/
+cache_v2/
+!results/optuna_v2_study.pkl

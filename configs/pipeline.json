@@ -46,5 +46,28 @@
     "realign_to_predicted_route": true,
     "max_dist_m": 80.0,
     "selected_on": "training OOF scores (results/realign_summary.json)"
+  },
+  "round2": {
+    "candidates": {
+      "radius_m": 80.0,
+      "max_k": 24,
+      "k_samples": 192
+    },
+    "features": 46,
+    "objective": "lambdarank",
+    "train_stride": 3,
+    "bayes_opt": {
+      "sampler": "Optuna TPE multivariate",
+      "n_trials": 40,
+      "search_train_stride": 9,
+      "promotion": "top-5 trials re-scored at stride 3"
+    },
+    "decoder_tuning": {
+      "sampler": "Optuna TPE",
+      "n_trials": 64,
+      "objective": "mean per-trip final top-1 on folds 0-3",
+      "holdout": "fold 4",
+      "adopted": false
+    }
   }
 }

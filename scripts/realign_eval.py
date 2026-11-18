@@ -20,7 +20,7 @@ from pathsnap.hmm import HMMParams, decode, realign_to_route, reconstruct_route 
 from pathsnap.metrics import continuity, route_overlap  # noqa: E402
 
 RES, CACHE = ROOT / "results", ROOT / "cache"
-CFG = json.load(open(ROOT / "models/final_config.json"))
+CFG = json.load(open(ROOT / "configs/round1_config.json"))   # round-1 system (v1 features, tuned LightGBM)
 HP = HMMParams(**{k: v for k, v in CFG["hmm_params"].items() if k in ("beta", "w_emit")})
 
 

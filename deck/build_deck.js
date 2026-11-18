@@ -116,7 +116,7 @@ s.addText("Pipeline: candidates, learned scores, sequence decoding", { placehold
 fitImage(s, "diagram_pipeline.png", 0.6, 1.35, 12.1, 3.2, "pipeline");
 bullets(s, [
   "Labels: the .route has no per-fix alignment, so fixes are aligned to the route sequence with a monotone dynamic programme",
-  `Candidates: arcs within 80 m, at most 12 per fix; reference arc missing for only ${pct(D.data.miss_test)} of test fixes`,
+  "Candidates: arcs within 80 m, up to 24 per fix (12 in round 1); the reference arc is among them for every scored test fix",
   "Prediction never reads .route; evaluation reads it afterwards, on the server only",
 ], 0.6, 4.7, 12.1, 2.1, 16, "pipeline_notes");
 s.addNotes("Why ranking instead of multi-class: arc IDs are trip-specific, so we score each candidate arc of a fix with a binary classifier and renormalise within the fix. Labels come from aligning the fix sequence to the route sequence with a monotone DP, which handles loops and skipped short arcs.");
@@ -127,14 +127,14 @@ s.addText("Relative distance and heading decide the match", { placeholder: "titl
 const fi = D.features.slice().reverse();
 s.addChart(pres.charts.BAR, [{ name: "gain share", labels: fi.map((f) => f[0]), values: fi.map((f) => f[1]) }], {
   x: 0.6, y: 1.4, w: 7.0, h: 5.4, barDir: "bar", chartColors: ["111111"], showLegend: false,
-  ...chartBase("Final model: share of split gain (top 8 of 28 features)"), dataLabelFormatCode: "0.0%", valAxisLabelFormatCode: "0%",
+  ...chartBase("Round-1 model: share of split gain (top 8 of 28 features)"), dataLabelFormatCode: "0.0%", valAxisLabelFormatCode: "0%",
 });
 bullets(s, [
   "Distance: absolute, rank, gap to the best candidate",
   "Heading vs arc bearing, over ±2 and ±8 fixes, weighted by speed",
   "Context: distance of neighbouring fixes to the same arc",
   "Topology: touches neighbours' nearest arc, node degrees, two-way",
-  "All 28 features are route-free",
+  "Round 2 adds 18 more context features; all are route-free",
 ], 8.0, 1.6, 4.7, 5.0, 15, "feature_groups");
 s.addNotes("Feature importance from the tuned LightGBM. Relative distance (how much farther than the best candidate) generalises across noise levels better than raw distance; the windowed heading resolves the direction of two-way streets.");
 
@@ -185,22 +185,38 @@ stat(s, 8.4, 3.3, 4.3, `${f4(tu.cv_top1)} → ${f4(tt.cv_top1)}`, "CV top-1, unt
 stat(s, 8.4, 5.1, 4.3, `${f4(tu.test_top1)} → ${f4(tt.test_top1)}`, "student-test top-1, untuned → tuned; tuned overfits less and scores 2x faster", false, "o3", 34);
 s.addNotes(`Search space: trees, learning rate, leaves, min child samples, bagging fractions, L1/L2. Objective: mean CV top-1 on the 80 training trips only. Every trial lies between ${f3(D.optuna.min)} and ${f3(D.optuna.max)}, so the features, not the hyperparameters, limit accuracy. The gain is smaller than the fold-to-fold variation; we report it as small.`);
 
+// 8b --------------------------------------------------------------- round 2
+const R2 = D.r2, V = R2.variants;
+s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Tuning & decoding" });
+s.addText("Round 2: better features and a ranking objective", { placeholder: "title" });
+const vl = ["R1 scorer\n28 features", "24 candidates\nsame features", "+ 18 context\nfeatures", "+ LambdaRank\nobjective"];
+s.addChart(pres.charts.BAR, [
+  { name: "CV top-1", labels: vl, values: [V[0].cv_top1, V[1].cv_top1, V[2].cv_top1, V[3].cv_top1] },
+  { name: "CV macro-F1", labels: vl, values: [V[0].cv_macro_f1, V[1].cv_macro_f1, V[2].cv_macro_f1, V[3].cv_macro_f1] },
+], { x: 0.6, y: 1.35, w: 7.4, h: 5.5, barDir: "col", barGrouping: "clustered", chartColors: ["111111", "A6A6A6"],
+  showLegend: true, legendPos: "b", legendFontSize: 11, valAxisMinVal: 0.84, valAxisMaxVal: 0.94, valAxisLabelFormatCode: "0.00",
+  ...chartBase("Same 5 trip-grouped folds, 80 training trips"), dataLabelFontSize: 9 });
+stat(s, 8.4, 1.5, 4.3, `${f3(R2.r1_scorer.test_top1)} → ${f3(R2.scorer.test_top1)}`, "scorer top-1 on student-test, round 1 → round 2", false, "v1", 34);
+stat(s, 8.4, 3.3, 4.3, `${f3(R2.r1_scorer.test_f1)} → ${f3(R2.scorer.test_f1)}`, "scorer macro-F1 on student-test", false, "v2", 34);
+stat(s, 8.4, 5.1, 4.3, `${f3(R2.r1_scorer.test_ll)} → ${f3(R2.scorer.test_ll)}`, "observation log loss on student-test (lower is better)", false, "v3", 34);
+s.addNotes(`Round 1 showed hyperparameters were not the limit, so round 2 changed what the model sees and optimises, with labels, folds and metrics fixed. More candidates alone do not help; the 18 context features do; LambdaRank (rank the candidates of one fix) helps again. A second Optuna search of ${R2.optuna2.n_trials} trials (top five re-scored at full fidelity) again tied the existing parameters within fold noise, so they were kept. Likely question: is it overfitting? Train-fold top-1 is ${f3(R2.scorer.train_top1)} vs ${f3(R2.scorer.cv_top1)} on validation folds, a larger gap than round 1, but validation and student-test both improved.`);
+
 // 9 ---------------------------------------------------------------- HMM
-const FT = D.final.test, FTR = D.final.train;
+const FT = R2.test, FTR = R2.train, VALD = R2.val;
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Tuning & decoding" });
 s.addText("Decoding turns point guesses into a drivable route", { placeholder: "title" });
-stat(s, 0.6, 1.5, 4.6, `${f3(FT.cls.top1)} → ${f3(FT.hmm.top1)} → ${f3(FT.realign.top1)}`, "top-1: classifier → + HMM/Viterbi → + re-alignment to the predicted route", false, "h1", 25);
-stat(s, 0.6, 3.3, 4.4, `${f3(FT.cls.continuity)} → ${f3(FT.realign.continuity)}`, "route continuity, classifier → final", false, "h2", 30);
-stat(s, 0.6, 5.1, 4.4, `${f3(sel.cls_route_f1)} → ${f3(sel.hmm_route_f1)}`, "route F1 (length-weighted), classifier → decoded route", false, "h3", 30);
-const pt = D.final.pertrip;
+stat(s, 0.6, 1.5, 4.6, `${f3(FT.cls.top1)} → ${f3(FT.hmm.top1)} → ${f3(FT.final.top1)}`, "top-1: scorer → + HMM/Viterbi → + re-alignment to the predicted route", false, "h1", 25);
+stat(s, 0.6, 3.3, 4.4, `${f3(FT.cls.continuity)} → ${f3(FT.final.continuity)}`, "route continuity, scorer → final", false, "h2", 30);
+stat(s, 0.6, 5.1, 4.4, f3(FT.route_f1), "route F1 (length-weighted) of the decoded route", false, "h3", 30);
+const pt = R2.pertrip;
 s.addChart(pres.charts.BAR, [
-  { name: "classifier only", labels: pt.map((r) => r.trip.slice(-3)), values: pt.map((r) => r.cls_top1) },
-  { name: "+ HMM/Viterbi", labels: pt.map((r) => r.trip.slice(-3)), values: pt.map((r) => r.hmm_top1) },
-  { name: "+ re-alignment (final)", labels: pt.map((r) => r.trip.slice(-3)), values: pt.map((r) => r.realign_top1) },
+  { name: "scorer only", labels: pt.map((r) => r.trip.slice(-3)), values: pt.map((r) => r.cls) },
+  { name: "+ HMM/Viterbi", labels: pt.map((r) => r.trip.slice(-3)), values: pt.map((r) => r.hmm) },
+  { name: "+ re-alignment (final)", labels: pt.map((r) => r.trip.slice(-3)), values: pt.map((r) => r.final) },
 ], { x: 5.3, y: 1.35, w: 7.4, h: 5.5, barDir: "col", barGrouping: "clustered", chartColors: ["D9D9D9", "8C8C8C", "111111"],
   showLegend: true, legendPos: "b", legendFontSize: 11, valAxisMinVal: 0.7, valAxisMaxVal: 1.0, valAxisLabelFormatCode: "0.00",
   ...chartBase("Per student-test trip (last 3 digits of trip ID): observation top-1"), showValue: false });
-s.addNotes(`States are candidate arcs; emissions are the renormalised classifier probabilities (weight ${D.hmm.params.w_emit}); transitions compare driving distance through the directed graph with straight-line distance between fixes (beta ${D.hmm.params.beta} m) plus a speed limit. Chains break at gaps over 60 s, jumps over 1.5 km, fixes without candidates, or when no transition is feasible. Final step: Viterbi fixes the route, then each fix is assigned to an arc of that predicted route in travel order (no reference used). Both decoder parameters and this step were chosen on training-trip out-of-fold scores: top-1 ${f3(FTR.hmm.top1)} to ${f3(FTR.realign.top1)}, better on ${FTR.trips_realign_better_top1} of 80 trips, worse on ${FTR.trips_realign_worse_top1}. Likely question: does the last step use the answer? No: predictions are identical when the .route files are deleted.`);
+s.addNotes(`States are the candidate arcs of each fix; emissions are its probabilities; transitions compare driving distance through the directed graph with straight-line distance between fixes, plus speed, backward-motion and U-turn penalties. Chains break at long gaps, fixes without candidates, or infeasible transitions. Final step: Viterbi fixes the route, then each fix is assigned to an arc of that predicted route in travel order (no reference used). We also ran two Bayesian searches over eight decoder parameters (${R2.decoder.n_trials} trials each); the best setting gained on its tuning trips but dropped from ${f3(R2.heldout.round1_decoder.trip_mean_top1)} to ${f3(R2.heldout.tuned_decoder.trip_mean_top1)} on 16 held-out training trips, so it was not adopted and the simple grid setting is kept. Final top-1 on the 80 training trips (out-of-fold): ${f3(FTR.final.top1)}. Likely question: does the last step use the answer? No: predictions are identical when the .route files are deleted.`);
 
 // 10 --------------------------------------------------------------- map
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Tuning & decoding" });
@@ -224,19 +240,19 @@ fitImage(s, "bw_screenshot_ui.png", 6.9, 1.35, 5.8, 5.5, "ui");
 s.addNotes(`End-to-end latency measured over HTTP in a fresh server: ${D.smoke["00000009"].seconds} s for trip 00000009 (${D.smoke["00000009"].n_observations} fixes) and ${D.smoke["00000077"].seconds} s for 00000077 (${D.smoke["00000077"].n_observations} fixes). The screenshot is from a local run; the two-laptop screenshots are captured at the live evaluation.`);
 
 // 12 --------------------------------------------------------------- result
-const EF = D.final.errors.final_pred, LN = D.final.label_noise;
+const EF = D.final.errors.final_pred, LN = D.final.label_noise, CI = VALD.student_test.final_top1.ci95;
 s = pres.addSlide({ masterName: "DARK", sectionTitle: "Demo & results" });
 s.addText("Final result on the 10 student-test trips", { x: 0.8, y: 0.7, w: 11.7, h: 0.9, fontSize: 30, bold: true,
   color: C.background1, isTextBox: true, objectName: "result_title" });
-stat(s, 0.8, 2.2, 2.8, f3(FT.realign.top1), "observation top-1 (nearest-segment baseline " + f3(D.baseline.test_top1) + ")", true, "r1");
-stat(s, 3.8, 2.2, 2.8, f3(FT.realign.macro_f1), "observation macro-F1 (per arc, per trip)", true, "r2");
-stat(s, 6.8, 2.2, 2.8, f3(sel.hmm_route_f1), "route F1, length-weighted", true, "r3");
-stat(s, 9.8, 2.2, 2.8, f3(FT.realign.continuity), "route continuity", true, "r4");
-s.addText(`Tuned LightGBM scorer + HMM/Viterbi + route re-alignment. All ${D.final.api_ok} trips served by the API in ${D.final.api_max_s.toFixed(1)} s or less.`, {
+stat(s, 0.8, 2.2, 2.8, f3(FT.final.top1), "observation top-1 (nearest-segment baseline " + f3(D.baseline.test_top1) + ")", true, "r1");
+stat(s, 3.8, 2.2, 2.8, f3(FT.final.macro_f1), "observation macro-F1 (per arc, per trip)", true, "r2");
+stat(s, 6.8, 2.2, 2.8, f3(FT.route_f1), "route F1, length-weighted", true, "r3");
+stat(s, 9.8, 2.2, 2.8, f3(FT.final.continuity), "route continuity", true, "r4");
+s.addText(`Top-1 95% interval over trips: ${f3(CI[0])} to ${f3(CI[1])}. On the 80 training trips (out-of-fold): ${f3(FTR.final.top1)}.`, {
   x: 0.8, y: 4.6, w: 11.7, h: 0.6, fontSize: 18, color: C.accent4, isTextBox: true, objectName: "result_note" });
-s.addText(`Residual error ${pct(EF.error_rate)}: ${EF.off_route} fixes off the reference route, ${EF.reverse_direction} opposite direction, ${EF.adjacent_on_route} neighbouring arc.`, {
+s.addText(`All ${D.final.api_ok} trips served by the API in ${D.final.api_max_s.toFixed(1)} s or less. Residual error ${pct(EF.error_rate)}.`, {
   x: 0.8, y: 5.3, w: 11.7, h: 0.6, fontSize: 18, color: C.accent4, isTextBox: true, objectName: "result_note2" });
-s.addNotes(`Development-stage numbers on the 10 student-test trips; the evaluator's reserved trips were never available to us, so their score is produced live by the API. Likely question: how trustworthy are the labels? ${pct(LN.share)} of moving fixes have a reference label pointing against the direction of travel (the alignment is geometry-only), and ${LN.of_which_label_against_motion} of the ${LN.final_reverse_direction_errors_while_moving} moving opposite-direction errors are of that kind, so part of the remaining error is label noise.`);
+s.addNotes(`Development-stage numbers on the 10 student-test trips; the evaluator's reserved trips were never available to us, so their score is produced live by the API. The training-trip figure is lower because a few training trips are much harder (weakest ${VALD.train_oof.worst_trip_final.trip}: ${f3(VALD.train_oof.worst_trip_final.top1)}), so expect variation between evaluator trips. Likely question: how trustworthy are the labels? ${pct(LN.share)} of moving fixes have a reference label pointing against the direction of travel (the alignment is geometry-only), so part of the remaining error is label noise.`);
 
 // 13 --------------------------------------------------------------- limitations
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Demo & results" });
@@ -245,8 +261,8 @@ s.addText("Limitations", { x: 0.6, y: 1.5, w: 5.8, h: 0.5, fontSize: 22, bold: t
 bullets(s, [
   "Labels come from aligning fixes to the supplied route; " + pct(LN.share) + " of moving fixes are labelled against the direction of travel",
   "Only 10 test trips: differences under ~0.01 are within noise",
-  "80 m / 12-candidate cap bounds recall",
-  "Bayesian tuning did not improve accuracy; features are the limit",
+  "Hard trips remain: weakest training trip is far below the average",
+  "Hyperparameter search barely moved accuracy; features and objective did",
 ], 0.6, 2.2, 5.9, 4.5, 17, "lim_list");
 s.addText("Reproducibility", { x: 6.9, y: 1.5, w: 5.8, h: 0.5, fontSize: 22, bold: true, color: C.text1, isTextBox: true, objectName: "rep_h" });
 bullets(s, [
@@ -260,7 +276,7 @@ s.addNotes("AI assistance (Claude) was used for coding and drafting under the te
 // 14 --------------------------------------------------------------- closing
 s = pres.addSlide({ masterName: "DARK", sectionTitle: "Demo & results" });
 s.addText("Learned scores choose the arc. Road topology makes it a route.", { placeholder: "title" });
-s.addText(`${f3(D.baseline.test_top1)} → ${f3(FT.cls.top1)} → ${f3(FT.hmm.top1)} → ${f3(FT.realign.top1)} top-1: nearest segment, classifier, Viterbi, final\ngithub.com/Sonuaadi0706/pathsnap-map-matching`, { placeholder: "body" });
+s.addText(`${f3(D.baseline.test_top1)} → ${f3(FT.cls.top1)} → ${f3(FT.hmm.top1)} → ${f3(FT.final.top1)} top-1: nearest segment, scorer, Viterbi, final\ngithub.com/Sonuaadi0706/pathsnap-map-matching`, { placeholder: "body" });
 s.addNotes("Close: each stage is measured on the same trips with the same labels. Code, logs, maps and the report are in the public repository; the live demo runs any of the evaluator's ten trips through the API.");
 
 pres.writeFile({ fileName: OUT }).then(async () => {

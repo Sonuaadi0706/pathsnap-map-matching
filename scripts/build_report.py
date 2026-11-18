@@ -50,6 +50,40 @@ APIALL = pd.read_csv(RES / "api_all_trips.csv", dtype={"trip": str})
 assert ERR["predictions_identical_without_route_files"] and (APIALL.status == "ok").all()
 assert RE["train"]["realign"]["top1"] > RE["train"]["hmm"]["top1"] and RE["student_test"]["realign"]["top1"] > RE["student_test"]["hmm"]["top1"]
 FT, FTR = RE["student_test"], RE["train"]
+# ---- round 2 (second tuning round)
+from pathsnap.candidates import FEATURES_V2, V2  # noqa: E402
+V2VAR = pd.read_csv(RES / "tune_v2_variants.csv")
+OPT2 = J("optuna_v2_best.json")
+TR2 = pd.read_csv(RES / "optuna_v2_trials.csv")
+TR2 = TR2[TR2.state == "COMPLETE"]
+M2U, M2T, CHOICE = J("model_lgbm_v2_untuned.json"), J("model_lgbm_v2.json"), J("final_choice.json")
+M2 = M2T if CHOICE["selected"] == "lgbm_v2" else M2U
+DEC = J("decoder_best.json")
+DTR = pd.read_csv(RES / "decoder_trials.csv")
+FS = J("final_summary.json")
+F2T, F2R = FS["student_test"]["final_decoder"], FS["train"]["final_decoder"]
+FSP, DECP = J("final_summary_pooled.json"), J("decoder_best_pooled.json")
+DGRID = pd.read_csv(RES / "decoder_grid_v2.csv")
+PROMO = pd.read_csv(RES / "optuna_v2_promotion.csv")
+FINAL = json.load(open(ROOT / "models/final_config.json"))
+assert not FS["adopted_tuned_decoder"] and not FS["grid2"]["adopted"] and FS["selected_decoder"] == "round1_decoder"
+assert CHOICE["selected"] == "lgbm_v2_untuned"
+FTEST = pd.read_csv(RES / "final_test.csv", dtype={"trip": str})
+FTRAIN = pd.read_csv(RES / "final_train_oof.csv", dtype={"trip": str})
+VAL = J("validation_final.json")
+ERR1 = J("error_breakdown_round1.json")
+CS1 = pd.read_csv(RES / "candidate_stats.csv", dtype={"trip": str})
+CS2 = pd.read_csv(RES / "candidate_stats_v2.csv", dtype={"trip": str})
+R1CFG = json.load(open(ROOT / "configs/round1_config.json"))
+assert FINAL["model"] == CHOICE["selected"] and VAL["predictions_identical_without_route_files"]
+assert VAL["independent_recomputation"]["match"]
+assert F2R["final"]["top1"] > FTR["realign"]["top1"], "round 2 must beat round 1 on training OOF to be adopted"
+ci = lambda d: f"{d['point']:.4f} [{d['ci95'][0]:.4f}, {d['ci95'][1]:.4f}]"  # noqa: E731
+
+
+def miss(cs, part):
+    g = cs[cs.partition == part]
+    return float(np.average(g.candidate_miss_rate, weights=g.n_obs * g.frac_reliable))
 FINAL = json.load(open(ROOT / "models/final_config.json"))
 TEAM = json.load(open(ROOT / "configs/team.json")) if (ROOT / "configs/team.json").exists() else {}
 SEL = HSUM["selected_model"]
@@ -147,16 +181,22 @@ table(team_rows, widths=[3.5 * cm, 10 * cm], header=False, zebra=False)
 story.append(Spacer(1, 0.8 * cm))
 hm = HAB.loc[SEL]
 P("<b>Summary.</b> Each GPS fix is matched to a road arc in two stages. (1) A candidate scorer ranks the "
-  f"arcs within {RADIUS_M:.0f} m of the fix (at most {MAX_K}) using {len(FEATURES)} route-free geometric, "
-  "kinematic, temporal-context and topology features. Six models from six algorithm families were trained "
-  "with identical candidates, labels and 5-fold trip-grouped cross-validation on the 80 training trips. "
-  f"LightGBM was best on every quality metric and was tuned with Optuna TPE ({OPT['n_trials']} trials). "
+  f"arcs within {RADIUS_M:.0f} m of the fix using route-free geometric, kinematic, temporal-context and topology "
+  "features. Six models from six algorithm families were trained with identical candidates, labels and 5-fold "
+  "trip-grouped cross-validation on the 80 training trips; LightGBM was best on every quality metric and was tuned "
+  f"with Optuna TPE ({OPT['n_trials']} trials). A second tuning round on the selected family (Section 4.1) widened "
+  f"the candidate set to {V2['max_k']} arcs, added {len(FEATURES_V2) - len(FEATURES)} features, switched to a "
+  f"LambdaRank objective and ran a second Bayesian search ({OPT2['n_trials']} trials). "
   "(2) An HMM decoded with Viterbi over the directed road graph turns the per-fix scores into a connected route, "
-  "and each fix is then re-assigned to an arc of that predicted route in travel order. "
-  f"On the 10 student-test trips the final system reaches observation top-1 accuracy <b>{f3(FT['realign']['top1'])}</b> "
-  f"(classifier alone {f3(FT['cls']['top1'])}, classifier + Viterbi {f3(FT['hmm']['top1'])}, nearest-segment baseline "
-  f"{f3(BASE['student_test']['obs_top1'])}), macro-F1 <b>{f3(FT['realign']['macro_f1'])}</b>, route continuity "
-  f"<b>{f3(FT['realign']['continuity'])}</b> and length-weighted route F1 <b>{f3(hm.hmm_route_f1)}</b>. "
+  "and each fix is then re-assigned to an arc of that predicted route in travel order. Two further Bayesian searches "
+  f"over the decoder's parameters ({DEC['n_trials']} trials each) did not generalise to held-out training trips and "
+  "were not adopted (Section 5.3). "
+  f"On the 10 student-test trips the final system reaches observation top-1 accuracy <b>{f3(F2T['final']['top1'])}</b> "
+  f"(95% trip-bootstrap interval {VAL['student_test']['final_top1']['ci95'][0]:.3f}-{VAL['student_test']['final_top1']['ci95'][1]:.3f}; "
+  f"scorer alone {f3(F2T['cls']['top1'])}, nearest-segment baseline {f3(BASE['student_test']['obs_top1'])}), "
+  f"macro-F1 <b>{f3(F2T['final']['macro_f1'])}</b>, route continuity <b>{f3(F2T['final']['continuity'])}</b> and "
+  f"length-weighted route F1 <b>{f3(F2T['route_f1'])}</b>; on the 80 training trips (out-of-fold) top-1 is "
+  f"{f3(F2R['final']['top1'])}. "
   "A FastAPI service (laptop 1) and a browser UI (laptop 2) run the full pipeline per selected trip and score it "
   "against server-side reference routes that never reach the model or the UI.")
 fig("diagram_pipeline.png", "Figure 1. PathSnap pipeline. Dark boxes are learned / decoded components.")
@@ -268,9 +308,10 @@ feat_tab = [["Group", "Features", "Rationale"],
 table(feat_tab, widths=[2.6 * cm, 5.2 * cm, 9.6 * cm])
 P("Table 3. The 28 route-free features (pathsnap/candidates.py). None uses the reference route.", CAP)
 top = ", ".join(f"{k} ({v:.1%})" for k, v in FI.head(5).items())
-P(f"The tuned LightGBM attributes most split gain to {top} (Figure 7): relative distance and windowed heading "
+P(f"The round-1 tuned LightGBM attributes most split gain to {top} (Figure 7): relative distance and windowed heading "
   "agreement are the decisive signals, consistent with patterns (a) and (b).")
-fig("feat_importance_lgbm_tuned.png", "Figure 7. Feature importance (gain share) of the final model.", width=W * 0.62)
+fig("feat_importance_lgbm_tuned.png", "Figure 7. Feature importance (gain share) of the round-1 tuned LightGBM (28 features; the "
+    "round-2 feature additions are described in Section 4.1).", width=W * 0.62)
 P("2.5 Geographical map (Folium)", H2)
 fig("screenshot_map_eda.png", "Figure 8. Folium EDA map, train trip 00000002 (maps/eda_train_00000002.html): "
     "GPS fixes, nearby road network and reference route, with layer control and legend.", width=W * 0.9, maxh=11 * cm)
@@ -312,6 +353,12 @@ rows.append(["Tuned: LightGBM (Section 4)", "Boosting", "Optuna TPE best (Table 
              f3(te("lgbm_tuned", "obs_top1")), f3(te("lgbm_tuned", "route_continuity")),
              f3(te("lgbm_tuned", "obs_macro_f1_trip")), f3(te("lgbm_tuned", "obs_logloss")),
              f"{te('lgbm_tuned', 'infer_time_s'):.2f} s"])
+rows.append(["Round 2: LightGBM LambdaRank (Section 4.1)", "Boosting (ranking)",
+             f"v2 candidates (K={V2['max_k']}), {len(FEATURES_V2)} features, " + ("Optuna round-2 best" if CHOICE["selected"] == "lgbm_v2" else "round-1 tuned params"),
+             f"{f3(M2['cv_mean']['obs_macro_f1_trip'])} &plusmn; {f3(M2['cv_std']['obs_macro_f1_trip'])}",
+             f3(M2["student_test"]["obs_top1"]), f3(M2["student_test"]["route_continuity"]),
+             f3(M2["student_test"]["obs_macro_f1_trip"]), f3(M2["student_test"]["obs_logloss"]),
+             f"{M2['student_test']['infer_time_s']:.2f} s"])
 rows.append(["Reference: nearest segment", "Geometric (untrained)", "argmin distance",
              f"{f3(BASE['cv_mean']['obs_macro_f1_trip'])} (no fitting)", f3(BASE["student_test"]["obs_top1"]),
              f3(BASE["student_test"]["route_continuity"]), f3(BASE["student_test"]["obs_macro_f1_trip"]),
@@ -506,11 +553,106 @@ qa("6. Did the tuned model outperform the untuned model?",
 fig("optuna_history.png", "Figure 18. Optuna optimisation history (each point = mean CV top-1 over 5 folds).", width=W * 0.85)
 fig("optuna_importance.png", "Figure 19. fANOVA hyperparameter importance over completed trials.", width=W * 0.7)
 fig("optuna_tuned_vs_untuned.png", "Figure 20. Tuned vs untuned LightGBM on identical data and metrics.", width=W * 0.85)
+
+P("4.1 Second tuning round: candidates, features, objective and a second Bayesian search", H2)
+P("The first Bayesian search showed that LightGBM's hyperparameters were not the limiting factor (all 40 trials "
+  f"within {comp.value.max() - comp.value.min():.4f} of each other). A second round therefore changed what the "
+  "model sees and what it optimises, keeping labels, folds and metrics fixed so every step is comparable with "
+  "Section 3. Student-test was not used for any choice below.")
+P(f"<b>(a) Candidate set.</b> On the training trips {pc(miss(CS1, 'train'))} of scored fixes had a reference arc "
+  "outside the 12 nearest arcs; these fixes can never be scored correctly and were about a fifth of the remaining "
+  "out-of-fold errors of the round-1 system. They occur in local GPS drift bursts where ~25 arcs are closer than the "
+  f"true one. Keeping {V2['max_k']} arcs per fix (and querying {V2['k_samples']} index samples) lowers the miss rate "
+  f"to {pc(miss(CS2, 'train'))} on train and from {pc(miss(CS1, 'student_test'))} to {pc(miss(CS2, 'student_test'))} on "
+  "student-test (results/candidate_stats_v2.csv). The v2 table is stored separately (cache_v2/) so the six-model "
+  "benchmark of Section 3 remains reproducible on the v1 table.")
+f2 = [["Group (new in v2)", "Features", "Rationale"],
+      ["Asymmetric context", "d_prev5, d_next5, d_prev15, d_next15", "Mean distance of the previous / next fixes to the candidate separately: at an arc change the past supports the old arc and the future the new one."],
+      ["Relative context", "d_win5_gap, d_win15_gap, d_prev5_gap, d_next5_gap, d_win5_rank, cos_win_gap", "Context evidence relative to the best candidate of the same fix; makes the features comparable across noise levels (round 1 only did this for the raw distance)."],
+      ["Long-baseline direction", "cos_head_w20, prog8, disp20", "Heading over +-20 fixes and signed progress along the arc: direction remains defined during stops and slow driving."],
+      ["Position along the arc", "t_raw, t_prev5, t_next5", "Unclipped projection fraction of the fix and its neighbours: tells whether the vehicle has not yet reached, is on, or has already left the arc."],
+      ["Neighbour agreement", "win_nearest_share, win_cand_share", "Share of the +-5 fixes whose nearest arc is this candidate, and of nearby fixes that have it as a candidate at all."]]
+table(f2, widths=[3.0 * cm, 5.0 * cm, 9.4 * cm])
+P(f"Table 7a. The {len(FEATURES_V2) - len(FEATURES)} features added in round 2 (pathsnap/candidates.py, FEATURES_V2); all are "
+  "computed from the track and the road graph only.", CAP)
+vr = [["Variant", "Cand.", "Feat.", "Objective", "Train rows", "CV top-1", "CV macro-F1", "CV log loss", "CV miss rate"]]
+for _, r in V2VAR.iterrows():
+    vr.append([r.variant.split("  ")[0].strip() if "  " in r.variant else r.variant[:2], "K=12" if r.candidates == "v1" else f"K={V2['max_k']}",
+               int(r.n_features), r.objective, "every 3rd fix" if r.train_stride == 3 else "all fixes",
+               f"{r.cv_top1:.4f} &plusmn; {r.cv_top1_std:.3f}", f4(r.cv_macro_f1),
+               f4(r.cv_obs_logloss) if r.objective != "rank_xendcg" else f"{r.cv_obs_logloss:.2f} (uncalibrated)", pc(r.cv_miss_rate)])
+table(vr, widths=[1.5 * cm, 1.7 * cm, 1.5 * cm, 2.2 * cm, 2.0 * cm, 2.6 * cm, 1.8 * cm, 2.3 * cm, 1.6 * cm])
+a0, a1, bb, c1, c2, dd_ = [V2VAR.iloc[i] for i in range(6)]
+assert c1.cv_top1 == V2VAR.cv_top1.max() or dd_.cv_top1 <= c1.cv_top1 + 0.001
+P("Table 7b. Controlled comparison on the same 5 trip-grouped folds (scripts/tune_v2.py, results/tune_v2_variants.csv). "
+  "All variants use the round-1 tuned LightGBM hyperparameters; A0 reproduces the round-1 result exactly.", CAP)
+P(f"<b>(b) What changed accuracy.</b> More candidates alone do not help the scorer (A1: {f4(a1.cv_top1)} vs {f4(a0.cv_top1)}; "
+  "more distractors with the same information). The new features do: "
+  f"CV top-1 {f4(a0.cv_top1)} to {f4(bb.cv_top1)} and macro-F1 {f4(a0.cv_macro_f1)} to {f4(bb.cv_macro_f1)} (B). "
+  "<b>(c) Objective.</b> The task is to rank the candidates of one fix, so we replaced the per-row binary log loss by "
+  "LambdaRank (LightGBM's lambdarank: pairwise logistic loss between the reference arc and every other candidate of the "
+  "same fix, weighted by the change in NDCG; one query group per fix). It raises CV top-1 to "
+  f"{f4(c1.cv_top1)} and macro-F1 to {f4(c1.cv_macro_f1)} (C1). The listwise rank_xendcg objective was worse "
+  f"({f4(c2.cv_top1)}, C2). Training on all fixes instead of every third gave no gain ({f4(dd_.cv_top1)}, D) at three "
+  "times the cost, so every third fix is kept. Ranking scores are turned into a distribution over a fix's candidates "
+  f"with a softmax whose temperature (T = {M2['softmax_temperature']:.3f}) is fitted on training out-of-fold scores only.")
+fig("v2_variants.png", "Figure 20a. Round-2 variants: CV top-1 (fold std as error bars) and CV macro-F1.", width=W * 0.9)
+bp2 = OPT2["promoted_params"]
+P(f"<b>(d) Second Bayesian search.</b> Optuna TPE (multivariate, seed 42, 10 start-up trials) with {len(TR2)} completed "
+  "trials on the LambdaRank + v2-feature model; objective: mean 5-fold trip-grouped CV top-1; search space: "
+  + "; ".join(f"{k} {v}" for k, v in OPT2["search_space"].items()) +
+  f". For cost, each trial fitted on every {OPT2['search_train_stride']}th fix (wall time {OPT2['wall_time_s'] / 60:.1f} min). "
+  "A first attempt with up to 900 trees and 255 leaves was stopped after 2 trials because a single trial exceeded "
+  "3 minutes; the capacity range was reduced so that TPE could run a meaningful number of trials. Trial scores span "
+  f"only {TR2.value.min():.4f}-{TR2.value.max():.4f} (round-1 parameters under the same protocol: "
+  f"{f4(OPT2['untuned_same_protocol']['cv_top1'])}). Because the search ran on a smaller subsample than the final fit, its "
+  "five best trials were re-scored with the standard protocol (every 3rd fix, scripts/promote_v2.py):")
+pr = [["Trial", "Search CV top-1 (every 9th fix)", "Standard-protocol CV top-1", "CV macro-F1", "CV log loss"]]
+for _, r in PROMO.iterrows():
+    pr.append([int(r.trial), f4(r.search_cv_top1), f"{r.full_cv_top1:.4f} &plusmn; {r.full_cv_top1_std:.3f}", f4(r.full_cv_macro_f1), f4(r.full_cv_logloss)])
+pr.append(["round-1 parameters", f4(OPT2["untuned_same_protocol"]["cv_top1"]),
+           f"{M2U['cv_mean']['obs_top1']:.4f} &plusmn; {M2U['cv_std']['obs_top1']:.3f}", f4(M2U["cv_mean"]["obs_macro_f1_trip"]), f4(M2U["cv_mean"]["obs_logloss"])])
+table(pr, widths=[3.2 * cm, 4.2 * cm, 4.2 * cm, 2.4 * cm, 2.4 * cm])
+P(f"Table 7c. Multi-fidelity promotion of the search's top five trials (results/optuna_v2_promotion.csv). The ranking changes "
+  f"between fidelities: the search's best trial ({int(PROMO.iloc[0].trial)}) is not the best at full fidelity; trial "
+  f"{OPT2['promoted_trial']} is ("
+  + ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in bp2.items()) + ").", CAP)
+t2r = [["Scorer", "CV top-1", "CV macro-F1", "Train-fold top-1", "Gap", "Test top-1", "Test macro-F1", "Test log loss",
+        "Test contin.", "Score time (s)", "Fit time (s)"]]
+for lab_, m_ in [("round-1 parameters (not re-tuned)", M2U), (f"Optuna round 2, promoted trial {OPT2['promoted_trial']}", M2T)]:
+    c_, t_ = m_["cv_mean"], m_["student_test"]
+    t2r.append([lab_ + (" [selected]" if (m_ is M2) else ""), f"{c_['obs_top1']:.4f} &plusmn; {m_['cv_std']['obs_top1']:.3f}",
+                f4(c_["obs_macro_f1_trip"]), f4(c_["train_obs_top1"]), f"{c_['train_obs_top1'] - c_['obs_top1']:+.3f}",
+                f4(t_["obs_top1"]), f4(t_["obs_macro_f1_trip"]), f4(t_["obs_logloss"]), f4(t_["route_continuity"]),
+                f"{t_['infer_time_s']:.2f}", f"{m_['final_fit_time_s']:.1f}"])
+c_, t_ = M["lgbm_tuned"]["cv_mean"], M["lgbm_tuned"]["student_test"]
+t2r.append(["for reference: round-1 final scorer (v1 features, binary)", f"{c_['obs_top1']:.4f} &plusmn; {M['lgbm_tuned']['cv_std']['obs_top1']:.3f}",
+            f4(c_["obs_macro_f1_trip"]), f4(c_["train_obs_top1"]), f"{c_['train_obs_top1'] - c_['obs_top1']:+.3f}",
+            f4(t_["obs_top1"]), f4(t_["obs_macro_f1_trip"]), f4(t_["obs_logloss"]), f4(t_["route_continuity"]),
+            f"{t_['infer_time_s']:.2f}", f"{M['lgbm_tuned']['final_fit_time_s']:.1f}"])
+table(t2r, widths=[3.6 * cm, 1.75 * cm, 1.4 * cm, 1.3 * cm, 1.2 * cm, 1.3 * cm, 1.4 * cm, 1.3 * cm, 1.5 * cm, 1.3 * cm, 1.3 * cm])
+du_, dt2_ = M2U["cv_mean"], M2T["cv_mean"]
+P("Table 7d. Round-2 scorer, round-1 parameters vs round-2 Bayesian-tuned, refitted with the standard pipeline (every 3rd fix) on identical "
+  "folds, test trips and metrics (scripts/train_final_v2.py; results/model_lgbm_v2_untuned.json, model_lgbm_v2.json).", CAP)
+P(f"<b>Did the second search help?</b> CV top-1 {f4(du_['obs_top1'])} (untuned) vs {f4(dt2_['obs_top1'])} (tuned), CV macro-F1 "
+  f"{f4(du_['obs_macro_f1_trip'])} vs {f4(dt2_['obs_macro_f1_trip'])}; student-test top-1 {f4(M2U['student_test']['obs_top1'])} vs "
+  f"{f4(M2T['student_test']['obs_top1'])}. The train-fold vs validation gap is "
+  f"{du_['train_obs_top1'] - du_['obs_top1']:+.3f} vs {dt2_['train_obs_top1'] - dt2_['obs_top1']:+.3f}. "
+  f"Pre-declared rule (scripts/select_final_v2.py): the higher CV top-1 wins, a difference below 0.001 is a tie broken by the "
+  f"smaller train-validation gap. Selected: <b>{'Optuna round-2 best' if CHOICE['selected'] == 'lgbm_v2' else 'round-1 parameters'}</b> "
+  f"({CHOICE['reason']}); the two are equivalent within noise and the choice was not made on student-test. As in round 1, hyperparameters move accuracy far less than features and objective did: "
+  f"relative to the round-1 scorer the selected round-2 scorer gains {M2['cv_mean']['obs_top1'] - M['lgbm_tuned']['cv_mean']['obs_top1']:+.4f} "
+  f"CV top-1, {M2['cv_mean']['obs_macro_f1_trip'] - M['lgbm_tuned']['cv_mean']['obs_macro_f1_trip']:+.4f} CV macro-F1 and "
+  f"{M2['student_test']['obs_top1'] - M['lgbm_tuned']['student_test']['obs_top1']:+.4f} student-test top-1, and lowers student-test "
+  f"log loss from {f3(M['lgbm_tuned']['student_test']['obs_logloss'])} to {f3(M2['student_test']['obs_logloss'])}. Its "
+  "train-validation gap is larger than in round 1 (more capacity is used), but validation accuracy is higher on every fold.")
+fig("optuna_v2_history.png", "Figure 20b. Round-2 Optuna optimisation history.", width=W * 0.8)
 story.append(PageBreak())
 
 # ================================================================== 5 HMM
 P("5. HMM and Viterbi Route Reconstruction", H1)
-hp = FINAL["hmm_params"]
+hp = R1CFG["hmm_params"]      # round-1 decoder values (grid); final values: Section 5.3
+hp2 = FINAL["hmm_params"]
 qa("1. Hidden states", "For fix i the hidden state is one of its candidate arcs c &isin; C<sub>i</sub>, together "
    "with the projection fraction t<sub>c</sub> of the fix on that arc. The candidate-to-arc correspondence is the "
    "same table the classifier scored (trip, observation, arc ID), so the decoder returns an original arc ID per fix.")
@@ -523,7 +665,8 @@ qa("3. Transition probabilities", "log a(c, c') = -|d<sub>route</sub>(c, c') - d
    "c = c' (backward motion beyond 15 m costs an extra 60 m), otherwise the remaining part of c + shortest path "
    "from head(c) to tail(c') in the directed graph (Dijkstra, scipy, limit 3 km, computed in batches per trip) + "
    f"the initial part of c'. d<sub>gc</sub> is the straight-line distance between the fixes. Selected &beta; = "
-   f"{hp['beta']} m, v<sub>max</sub> = 60 m/s.")
+   f"{hp['beta']} m, v<sub>max</sub> = 60 m/s. The decoder code also supports a U-turn penalty and pruning to the scorer's "
+   "top-M candidates; both were tried in Section 5.3 and are switched off in the deployed setting.")
 qa("4. Missing candidates and large GPS gaps", "A fix without any candidate inside the radius gets no prediction "
    "(-1) and terminates the current Viterbi chain; a new chain starts at the next fix with candidates. A time gap "
    "&gt; 60 s or a jump &gt; 1.5 km also breaks the chain, because driving distance is no longer constrained by the "
@@ -608,8 +751,8 @@ table(brow)
 P("Table 10. Training trips (OOF) where the decoder lowered top-1 or route F1 (results/hmm_train_oof_pertrip.csv).", CAP)
 fig("hmm_ablation_models.png", "Figure 22. Effect of HMM decoding for every model's scores (student-test).")
 fig("hmm_pertrip.png", f"Figure 23. Per-trip classifier-only vs classifier + HMM ({NAMES[SEL]}).")
-P("5.1 Final per-fix assignment: re-alignment to the predicted route", H2)
-eh, ef = ERR["errors"]["hmm_pred"], ERR["errors"]["final_pred"]
+P("5.1 Per-fix assignment: re-alignment to the predicted route (round-1 system)", H2)
+eh, ef = ERR1["errors"]["hmm_pred"], ERR1["errors"]["final_pred"]
 P("An error analysis of the Viterbi output on student-test (scripts/error_analysis.py) showed that "
   f"{pc(eh['adjacent_on_route'] / eh['n_errors'])} of its wrong fixes were matched to the arc immediately before or "
   "after the reference arc <i>on the correct route</i>: the route is right, but the per-fix states switch arcs a few "
@@ -637,15 +780,15 @@ P(f"Top-1 improves on {FTR['trips_realign_better_top1']} of 80 training trips an
   "route itself contains a wrong detour, re-alignment spreads fixes onto it. Because the per-fix assignment now "
   "follows the same convention as the labels, the final top-1 is essentially a measure of how correct the "
   "predicted route is; it does not use the reference in any way (Section 5.2 verifies this).")
-P("5.2 Residual errors, label noise and leakage check", H2)
+P("5.2 Residual errors, label noise and leakage check (round-1 system)", H2)
 er = [["Stage", "Errors / scored fixes", "Error rate", "Neighbour arc on route", "Opposite direction", "Other arc on route", "Off the reference route"]]
 for k_, n_ in [("cls_pred", "classifier only"), ("hmm_pred", "+ HMM/Viterbi"), ("final_pred", "+ re-alignment (final)")]:
-    e_ = ERR["errors"][k_]
-    er.append([n_, f"{e_['n_errors']:,} / {ERR['n_scored_fixes']:,}", pc(e_["error_rate"]), e_["adjacent_on_route"],
+    e_ = ERR1["errors"][k_]
+    er.append([n_, f"{e_['n_errors']:,} / {ERR1['n_scored_fixes']:,}", pc(e_["error_rate"]), e_["adjacent_on_route"],
                e_["reverse_direction"], e_["other_on_route"], e_["off_route"]])
 table(er, widths=[3.6 * cm, 2.8 * cm, 1.6 * cm, 2.4 * cm, 2.2 * cm, 2.2 * cm, 2.4 * cm])
-P("Table 12. Residual-error breakdown on the 10 student-test trips (results/error_breakdown.json).", CAP)
-ln = ERR["label_noise"]
+P("Table 12. Residual-error breakdown of the round-1 system on the 10 student-test trips (results/error_breakdown_round1.json).", CAP)
+ln = ERR1["label_noise"]
 P(f"<b>Label noise.</b> {ln['label_against_motion']} of {ln['moving_scored_fixes']:,} scored fixes recorded while moving "
   f"faster than 3 m/s ({pc(ln['share'])}) have a reference label whose arc direction points <i>against</i> the GPS "
   "direction of travel (cosine &lt; -0.5). The label alignment is geometry-only, so on out-and-back stretches of a "
@@ -659,7 +802,124 @@ P("<b>Leakage check.</b> The ten student-test trips were copied to a temporary f
   "files and predicted again: classifier arcs, Viterbi arcs, final arcs and routes were identical for all ten trips "
   "(results/error_breakdown.json, predictions_identical_without_route_files = true). Independent recomputation of "
   "top-1, macro-F1 and log loss from the saved per-candidate scores reproduced the reported values exactly.")
-story.append(PageBreak())
+
+P("5.3 Bayesian tuning of the decoder (not adopted)", H2)
+dtc = DTR[DTR.state == "COMPLETE"]
+P("With the round-2 scorer we tried to re-tune the whole decoder for the quantity finally reported, the <i>final</i> top-1 "
+  "(Viterbi + re-alignment), on training trips with out-of-fold scores. Search space (Optuna TPE, multivariate, seed 42, "
+  "16 start-up trials, batches of 8; scripts/tune_decoder.py): &beta; log-uniform [2, 80] m; emission weight w log-uniform "
+  "[0.05, 2]; tolerated backward motion on the same arc [3, 40] m and its penalty [0, 200] m; a U-turn penalty [0, 8] (log "
+  "units) for switching to the opposite-direction arc; the chain-breaking time gap log-uniform [10, 300] s; the number of "
+  "top-scored candidates kept as states {6, 8, 12, 24}; and the re-alignment distance cap [30, 150] m. Shortest-path "
+  "distances do not depend on these parameters, so each trip is prepared once and only Viterbi is re-run per trial. "
+  "Trial 0 is always the round-1 setting.")
+p0, p1 = FSP["train"]["round1_decoder"], FSP["train"]["tuned_decoder"]
+P(f"<b>Attempt 1: pooled objective on all 80 training trips ({DECP['n_trials']} trials).</b> Pooled final top-1 rose from "
+  f"{f4(p0['final']['top1'])} to {f4(p1['final']['top1'])}, but the mean per-trip macro-F1 on the same trips <i>fell</i> from "
+  f"{f4(p0['final']['macro_f1'])} to {f4(p1['final']['macro_f1'])}, several tuned values sat on the search bounds "
+  f"(w = {DECP['best_params']['w_emit']:.3f}, U-turn penalty = {DECP['best_params']['uturn_pen']:.2f}), and student-test did not improve "
+  f"({f4(FSP['student_test']['round1_decoder']['final']['top1'])} to {f4(FSP['student_test']['tuned_decoder']['final']['top1'])}). A pooled "
+  "objective is dominated by a few very long trips, so the search was fitting those. This run is kept in "
+  "results/decoder_trials_pooled.csv, decoder_best_pooled.json and final_summary_pooled.json.")
+tu0, tu1, ho0, ho1 = FS["tuning_trips"]["round1_decoder"], FS["tuning_trips"]["tuned_decoder"], FS["heldout_trips"]["round1_decoder"], FS["heldout_trips"]["tuned_decoder"]
+P(f"<b>Attempt 2: per-trip objective with held-out training trips ({len(dtc)} trials).</b> Objective: mean per-trip final "
+  "top-1 (the evaluator scores one trip at a time) on the 64 training trips of CV folds 0-3; the 16 trips of fold 4 were "
+  "held out. Adoption rule fixed before the run: the tuned setting replaces the round-1 setting only if, on the held-out "
+  "training trips, mean per-trip top-1 improves and mean per-trip macro-F1 does not decrease.")
+bd = DEC["best_params"]
+dr = [["Trips", "Decoder", "Mean per-trip top-1", "Mean per-trip macro-F1", "Pooled top-1", "Continuity"]]
+for lab_, key_ in [("64 tuning trips (folds 0-3)", "tuning_trips"), ("16 held-out training trips (fold 4)", "heldout_trips")]:
+    for nm_, k2_ in [("round-1 setting", "round1_decoder"), ("TPE best", "tuned_decoder")]:
+        S_ = FS[key_][k2_]
+        dr.append([lab_ if k2_ == "round1_decoder" else "", nm_, f4(S_["trip_mean_top1"]), f4(S_["trip_mean_macro_f1"]), f4(S_["pooled_top1"]), f4(S_["continuity"])])
+for nm_, k2_ in [("round-1 setting", "round1_decoder"), ("TPE best", "tuned_decoder")]:
+    S_ = FS["student_test"][k2_]
+    dr.append(["10 student-test trips (not used by the rule)" if k2_ == "round1_decoder" else "", nm_, f4(S_["trip_mean_top1"]), f4(S_["final"]["macro_f1"]), f4(S_["final"]["top1"]), f4(S_["final"]["continuity"])])
+table(dr, widths=[5.4 * cm, 2.6 * cm, 2.6 * cm, 2.9 * cm, 2.0 * cm, 1.9 * cm])
+P("Table 12a. Decoder tuning, attempt 2 (results/final_summary.json, decoder_best.json; all trials in results/decoder_trials.csv). "
+  "TPE best: " + ", ".join(f"{k}={v:.3g}" if isinstance(v, float) else f"{k}={v}" for k, v in bd.items()) + ".", CAP)
+P(f"On the tuning trips the best setting gains {tu1['trip_mean_top1'] - tu0['trip_mean_top1']:+.4f} mean per-trip top-1, but on the "
+  f"held-out training trips it <i>loses</i> {ho1['trip_mean_top1'] - ho0['trip_mean_top1']:+.4f} ({f4(ho0['trip_mean_top1'])} to "
+  f"{f4(ho1['trip_mean_top1'])}). The rule therefore rejects it. On student-test the same setting happens to score higher "
+  f"({f4(FS['student_test']['round1_decoder']['final']['top1'])} to {f4(FS['student_test']['tuned_decoder']['final']['top1'])}); we did not "
+  "let that override the rule, because choosing a setting for its student-test score would be selecting on the test set, and the "
+  "two held-out results disagree in sign, which is itself evidence that eight decoder parameters cannot be tuned reliably "
+  "on 64-80 trips.")
+g2 = FS["grid2"]
+P(f"<b>Attempt 3: 2-parameter grid.</b> A 4 x 4 grid over &beta; in {{5, 10, 20, 40}} m and w in {{0.1, 0.25, 0.5, 1}} "
+  "(scripts/decoder_grid_v2.py, results/decoder_grid_v2.csv) under the same rule: mean per-trip top-1 on the tuning trips "
+  f"ranges only from {DGRID.tune_trip_mean_top1.min():.4f} to {DGRID.tune_trip_mean_top1.max():.4f}; the best cell "
+  f"(&beta; = {g2['best_on_tuning_trips']['beta']:g}, w = {g2['best_on_tuning_trips']['w_emit']:g}) improves held-out top-1 "
+  f"({f4(g2['heldout']['round1'])} to {f4(g2['heldout']['best'])}) but not held-out macro-F1 ({f4(g2['heldout']['round1_macro_f1'])} to "
+  f"{f4(g2['heldout']['best_macro_f1'])}), so it is not adopted either. The decoder sits on a flat plateau: the round-1 setting "
+  f"(&beta; = {hp['beta']:g} m, w = {hp['w_emit']:g}) is kept for the deployed system, and all gains of round 2 come from the scorer.")
+fig("decoder_tuning_history.png", "Figure 23a. Decoder tuning, attempt 2: mean per-trip final top-1 on the 64 tuning trips per trial.", width=W * 0.8)
+
+P("5.4 Final system: results and validation", H2)
+lad = [["Stage", "Train (CV / OOF) top-1", "Test top-1", "Test macro-F1", "Test continuity"],
+       ["Nearest segment (baseline)", f4(BASE["cv_mean"]["obs_top1"]), f4(BASE["student_test"]["obs_top1"]), f4(BASE["student_test"]["obs_macro_f1_trip"]), f4(BASE["student_test"]["route_continuity"])],
+       ["Round 1 scorer: LightGBM binary, 28 features", f4(FTR["cls"]["top1"]), f4(FT["cls"]["top1"]), f4(FT["cls"]["macro_f1"]), f4(FT["cls"]["continuity"])],
+       ["Round 1 + HMM/Viterbi (grid decoder)", f4(FTR["hmm"]["top1"]), f4(FT["hmm"]["top1"]), f4(FT["hmm"]["macro_f1"]), f4(FT["hmm"]["continuity"])],
+       ["Round 1 final (+ re-alignment)", f4(FTR["realign"]["top1"]), f4(FT["realign"]["top1"]), f4(FT["realign"]["macro_f1"]), f4(FT["realign"]["continuity"])],
+       [f"Round 2 scorer: LambdaRank, {len(FEATURES_V2)} features, K={V2['max_k']}", f4(F2R["cls"]["top1"]), f4(F2T["cls"]["top1"]), f4(F2T["cls"]["macro_f1"]), f4(F2T["cls"]["continuity"])],
+       ["Round 2 + HMM/Viterbi (same decoder setting)", f4(F2R["hmm"]["top1"]), f4(F2T["hmm"]["top1"]), f4(F2T["hmm"]["macro_f1"]), f4(F2T["hmm"]["continuity"])],
+       ["Round 2 final (+ re-alignment) = deployed system", f4(F2R["final"]["top1"]), f4(F2T["final"]["top1"]), f4(F2T["final"]["macro_f1"]), f4(F2T["final"]["continuity"])]]
+table(lad, widths=[7.4 * cm, 3.0 * cm, 2.2 * cm, 2.4 * cm, 2.4 * cm])
+P("Table 12c. Accuracy ladder. Train column: scorer rows on all fixes of the 80 training trips with out-of-fold scores; "
+  f"test: all scored fixes of the 10 student-test trips. Route F1 of the deployed system: {f4(F2T['route_f1'])} (test), "
+  f"{f4(F2R['route_f1'])} (train OOF). Sources: results/realign_summary.json, results/final_summary.json.", CAP)
+fig("final_ladder.png", "Figure 23b. Accuracy ladder on training (CV / out-of-fold) and student-test trips.", width=W * 0.95)
+vt, vs = VAL["train_oof"], VAL["student_test"]
+vrows = [["Partition", "Trips / fixes", "Round-1 final top-1 [95% CI]", "Final top-1 [95% CI]", "Difference [95% CI]", "P(better)", "Trips better / equal / worse"]]
+for lab_, v_ in [("80 training trips (OOF)", vt), ("10 student-test trips", vs)]:
+    vrows.append([lab_, f"{v_['n_trips']} / {v_['n_fixes']:,}", ci(v_["round1_final_top1"]), ci(v_["final_top1"]),
+                  f"{v_['difference']['point']:+.4f} [{v_['difference']['ci95'][0]:+.4f}, {v_['difference']['ci95'][1]:+.4f}]",
+                  f"{v_['difference']['prob_improvement']:.3f}", f"{v_['trips_better']} / {v_['trips_equal']} / {v_['trips_worse']}"])
+table(vrows, widths=[3.4 * cm, 2.1 * cm, 3.1 * cm, 3.1 * cm, 2.9 * cm, 1.5 * cm, 1.9 * cm])
+P(f"Table 12d. Trip-level bootstrap ({VAL['bootstrap_resamples']:,} resamples of trips; pooled accuracy; paired difference "
+  "final minus round-1 final). scripts/validate_final.py, results/validation_final.json.", CAP)
+ls_ = VAL["label_sensitivity_student_test"]
+sig = vs["difference"]["ci95"][0] > 0
+P("<b>How certain is the improvement?</b> On the 80 training trips the round-2 system is better than the round-1 system by "
+  f"{vt['difference']['point']:+.4f} top-1 with a 95% interval of [{vt['difference']['ci95'][0]:+.4f}, {vt['difference']['ci95'][1]:+.4f}] "
+  f"({vt['trips_better']} trips better, {vt['trips_worse']} worse). On the 10 student-test trips the difference is "
+  f"{vs['difference']['point']:+.4f} [{vs['difference']['ci95'][0]:+.4f}, {vs['difference']['ci95'][1]:+.4f}] "
+  f"({vs['trips_better']} better, {vs['trips_worse']} worse)"
+  + ("; the interval excludes zero. " if sig else "; with only ten trips the interval includes zero, so on student-test alone the gain is not statistically established. ")
+  + f"The weakest student-test trip of the final system is {vs['worst_trip_final']['trip']} ({vs['worst_trip_final']['top1']:.3f}); "
+  f"the weakest training trip is {vt['worst_trip_final']['trip']} ({vt['worst_trip_final']['top1']:.3f}), so individual trips "
+  "can still be far below the average.")
+P("<b>Sensitivity to the labelling convention.</b> Labels come from a geometry-only alignment (Section 2.1). As a check we "
+  "re-scored both systems against direction-aware labels (same alignment plus a 40 m penalty when a fix moving faster than "
+  f"3 m/s would be assigned to an arc pointing against its travel direction; {ls_['labels_changed_by_direction_term']:,} of "
+  f"{ls_['scored_fixes_geometry_only']:,} student-test labels change). Final top-1 is {f4(ls_['final_top1']['geometry_only_labels'])} "
+  f"under the official labels and {f4(ls_['final_top1']['direction_aware_labels'])} under direction-aware labels (round-1 system: "
+  f"{f4(ls_['round1_final_top1']['geometry_only_labels'])} and {f4(ls_['round1_final_top1']['direction_aware_labels'])}). The ranking of "
+  "the two systems does not depend on the convention, but both score about 1.5 points lower under direction-aware labels: the "
+  "re-alignment step uses the same geometry-only convention as the official labels, so part of its gain is agreement with that "
+  "convention. All headline numbers use the official geometry-only labels.")
+ef2 = ERR["errors"]
+er2 = [["Final system, stage", "Errors / scored fixes", "Error rate", "Neighbour arc on route", "Opposite direction", "Other arc on route", "Off the reference route"]]
+for k_, n_ in [("cls_pred", "scorer only"), ("hmm_pred", "+ HMM/Viterbi"), ("final_pred", "+ re-alignment (final)")]:
+    e_ = ef2[k_]
+    er2.append([n_, f"{e_['n_errors']:,} / {ERR['n_scored_fixes']:,}", pc(e_["error_rate"]), e_["adjacent_on_route"],
+                e_["reverse_direction"], e_["other_on_route"], e_["off_route"]])
+table(er2, widths=[3.6 * cm, 2.8 * cm, 1.6 * cm, 2.4 * cm, 2.2 * cm, 2.2 * cm, 2.4 * cm])
+P(f"Table 12e. Residual-error breakdown of the deployed system on student-test (results/error_breakdown.json). Round-1 system "
+  f"for comparison: {ERR1['errors']['final_pred']['n_errors']} errors ({pc(ERR1['errors']['final_pred']['error_rate'])}).", CAP)
+fr = [["Trip", "Fixes", "Scorer top-1", "+ HMM", "Final top-1", "Final macro-F1", "Final continuity", "Route P / R", "Route F1", "Chains", "Decode s"]]
+for _, r in FTEST.iterrows():
+    fr.append([r.trip, int(r.n_obs), f3(r.cls_top1), f3(r.hmm_top1), f3(r.final_top1), f3(r.final_macro_f1), f3(r.final_continuity),
+               f"{r.route_precision:.3f} / {r.route_recall:.3f}", f3(r.route_f1), int(r.chains), f"{r.decode_time_s:.2f}"])
+table(fr)
+P("Table 12f. Deployed system per student-test trip (results/final_test.csv). Per-trip training results: results/final_train_oof.csv.", CAP)
+P("<b>Verification of the final system.</b> (i) Predictions for all ten student-test trips are identical when the .route files are "
+  "removed from disk; (ii) the final top-1 recomputed from the deployed pipeline's own output "
+  f"({VAL['independent_recomputation']['final_top1_from_pipeline']:.6f}) equals the value from the tuning script "
+  f"({VAL['independent_recomputation']['final_top1_from_tuning_csv']:.6f}); (iii) every stage of the ladder was selected on the 80 "
+  "training trips (CV or out-of-fold) and only then evaluated on student-test; (iv) the fresh-process smoke test and the "
+  "all-trips API run of Section 7 use this same configuration.")
+
 
 # ================================================================== 6 Folium
 P("6. Geographical Visualisation Using Folium", H1)
@@ -680,7 +940,7 @@ story.append(PageBreak())
 P("7. API, UI and Deployment", H1)
 fig("diagram_deployment.png", "Figure 26. Two-laptop deployment.", width=W * 0.9)
 P("<b>Backend (laptop 1).</b> api/server.py (FastAPI + uvicorn, bound to 0.0.0.0:8000) loads "
-  f"models/final_config.json (model = {FINAL['model']}, &beta; = {hp['beta']}, w = {hp['w_emit']}) and the model "
+  f"models/final_config.json (model file {FINAL['model']}.joblib = {FINAL.get('display_name', FINAL['model'])}, feature set v2, decoder setting of Section 5) and the model "
   "file once at start-up. GET /trips lists the trip folders of the configured partition (PATHSNAP_PARTITION), "
   "so the ten reserved evaluator trips are discovered from disk, not hardcoded. POST /predict {trip_id} runs (1) "
   "the route-free pipeline: load trip without its .route, candidates, features, classifier, HMM, route filling, "
@@ -732,8 +992,9 @@ P("<b>Limitations.</b> (1) Observation labels come from aligning fixes to the su
   f"{int(QUAL.set_index('check').loc['observations flagged off-route (>60 m)', 'student_test'])} in student-test) are "
   "excluded. (2) Student-test has only 10 trips, so differences below ~0.01 are within trip-to-trip variation. "
   "(3) Bayesian search fitted on a stride-6 subsample for cost; the refit uses stride 3. (4) Candidate radius "
-  f"{RADIUS_M:.0f} m / K={MAX_K} caps recall; fixes with larger errors cannot be recovered by any model. "
-  "(5) The decoder parameters were chosen on a small grid. (6) Evaluator trips may come from other regions; the "
+  f"{RADIUS_M:.0f} m / K={V2['max_k']} (K={MAX_K} in round 1) caps recall; fixes with larger errors cannot be recovered by the scorer. "
+  "(5) The decoder setting comes from a small grid; a Bayesian search over eight decoder parameters did not generalise "
+  "to held-out training trips (Section 5.3). The round-2 scorer has a larger train-validation gap than the round-1 scorer. (6) Evaluator trips may come from other regions; the "
   "features are local and scale-free where possible, but this was only tested across the 90 supplied trips.")
 P("<b>Reproducibility.</b> Fixed seed 42; fold assignment stored in results/folds.json; exact package versions in "
   "requirements.txt; every figure and table is regenerated by the scripts listed in the README from the raw files. "
@@ -745,15 +1006,18 @@ P("<b>AI assistance disclosure.</b> An AI coding assistant (Claude) was used to 
 P("9. Conclusion", H1)
 P(f"Nearest-segment matching is right for only {pc(BASE['student_test']['obs_top1'])} of student-test fixes, mainly "
   "because two-way streets put two arcs at the same distance. A learned candidate scorer with heading and "
-  f"temporal-context features raises this to {pc(FT['cls']['top1'])}; all six model families beat the baseline by a "
-  "wide margin and LightGBM is best on every quality metric, although Bayesian tuning changed its accuracy by less "
-  "than the fold-to-fold noise. Sequence decoding matters as much as the scorer: HMM/Viterbi over the road graph "
-  f"lifts top-1 to {pc(FT['hmm']['top1'])} and continuity to {pc(FT['hmm']['continuity'])}, and re-assigning fixes "
-  f"along the predicted route gives the final {pc(FT['realign']['top1'])} top-1, {pc(FT['realign']['macro_f1'])} "
-  f"macro-F1 and {pc(hm.hmm_route_f1)} route F1, in about a second per trip through the API. The remaining "
-  f"{pc(ERR['errors']['final_pred']['error_rate'])} of errors are roughly half genuinely off-route matches and half "
-  "arc-boundary or direction disagreements, part of which trace back to the reference labels. All numbers are "
-  "development-stage results on the ten student-test trips; the reserved evaluator trips were never available to us.")
+  f"temporal-context features raises this to {pc(FT['cls']['top1'])} (round 1); all six model families beat the baseline "
+  "by a wide margin and LightGBM is best on every quality metric. Two Bayesian searches over LightGBM's hyperparameters "
+  "each changed accuracy by less than the fold-to-fold noise; what moved accuracy was information and objective: "
+  f"{len(FEATURES_V2) - len(FEATURES)} additional context features and a LambdaRank objective lift the scorer to "
+  f"{pc(F2T['cls']['top1'])}. Sequence decoding matters as much as the scorer: HMM/Viterbi over the road graph plus "
+  f"re-assignment of fixes along the predicted route gives the final {pc(F2T['final']['top1'])} top-1, "
+  f"{pc(F2T['final']['macro_f1'])} macro-F1, {pc(F2T['final']['continuity'])} continuity and {pc(F2T['route_f1'])} route F1 "
+  f"on student-test ({pc(F2R['final']['top1'])} top-1 on the 80 training trips out-of-fold), in about a second per trip "
+  f"through the API. The remaining {pc(ERR['errors']['final_pred']['error_rate'])} of student-test errors are mostly "
+  "genuinely off-route matches plus arc-boundary and direction disagreements, part of which trace back to the reference "
+  "labels. All numbers are development-stage results; the reserved evaluator trips were never available to us, and "
+  "single trips can be well below the average (Section 5.4).")
 P("Appendix A. Optuna trial record", H2)
 trows = [["Trial", "CV top-1", "CV macro-F1", "n_est.", "lr", "leaves", "min_child", "subsample", "colsample", "lambda", "alpha"]]
 for _, r in comp.sort_values("number").iterrows():

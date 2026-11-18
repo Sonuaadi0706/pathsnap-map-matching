@@ -8,41 +8,41 @@
  },
  "health": {
   "status": "ok",
-  "model": "lgbm_tuned",
+  "model": "LightGBM LambdaRank (v2 features)",
   "partition": "smoke_partition"
  },
  "00000009": {
-  "seconds": 0.4,
+  "seconds": 0.53,
   "n_observations": 1049,
   "n_matched": 1049,
-  "route_arcs": 442,
+  "route_arcs": 435,
   "route_ids_valid": true,
   "route_consecutive_connected": 1.0,
   "hmm_segments": 1,
   "obs_count_matches_file": true,
   "no_reference_fields": true,
   "evaluation_available": true,
-  "acc_final": 0.9332697807435653,
-  "acc_hmm": 0.9227836034318398,
-  "acc_cls": 0.8903717826501429
+  "acc_final": 0.9418493803622497,
+  "acc_hmm": 0.9304099142040038,
+  "acc_cls": 0.9056244041944709
  },
  "00000077": {
-  "seconds": 0.82,
+  "seconds": 1.14,
   "n_observations": 3911,
   "n_matched": 3911,
-  "route_arcs": 354,
+  "route_arcs": 312,
   "route_ids_valid": true,
   "route_consecutive_connected": 1.0,
   "hmm_segments": 1,
   "obs_count_matches_file": true,
   "no_reference_fields": true,
   "evaluation_available": true,
-  "acc_final": 0.9483508054206086,
-  "acc_hmm": 0.8954231654308361,
-  "acc_cls": 0.8031194068013295
+  "acc_final": 0.9575556123753516,
+  "acc_hmm": 0.9030938378931219,
+  "acc_cls": 0.8504218869854258
  },
  "99999999": {
-  "seconds": 0.06,
+  "seconds": 0.08,
   "n_observations": 262,
   "n_matched": 162,
   "route_arcs": 71,
@@ -53,21 +53,21 @@
   "no_reference_fields": true,
   "evaluation_available": true,
   "acc_final": 0.9747899159663865,
-  "acc_hmm": 0.9663865546218487,
-  "acc_cls": 0.9243697478991597
+  "acc_hmm": 0.9747899159663865,
+  "acc_cls": 0.957983193277311
  },
  "server_log_tail": [
-  "2026-11-18 11:17:49,902 | INFO | POST /predict from 127.0.0.1 -> 200 in 814 ms",
-  "INFO:     127.0.0.1:58965 - \"POST /predict HTTP/1.1\" 200 OK",
-  "2026-11-18 11:17:49,907 | INFO | PREDICT request trip=99999999",
-  "2026-11-18 11:17:49,966 | INFO | PREDICT done trip=99999999 obs=262 route_arcs=71 acc_final=0.9748 acc_hmm=0.9664 acc_cls=0.9244 total=0.05s",
-  "2026-11-18 11:17:49,968 | INFO | POST /predict from 127.0.0.1 -> 200 in 62 ms",
-  "INFO:     127.0.0.1:58968 - \"POST /predict HTTP/1.1\" 200 OK",
-  "2026-11-18 11:17:49,971 | INFO | POST /predict from 127.0.0.1 -> 404 in 1 ms",
-  "INFO:     127.0.0.1:58969 - \"POST /predict HTTP/1.1\" 404 Not Found",
+  "2026-11-18 12:34:12,234 | INFO | POST /predict from 127.0.0.1 -> 200 in 1142 ms",
+  "INFO:     127.0.0.1:65292 - \"POST /predict HTTP/1.1\" 200 OK",
+  "2026-11-18 12:34:12,238 | INFO | PREDICT request trip=99999999",
+  "2026-11-18 12:34:12,312 | INFO | PREDICT done trip=99999999 obs=262 route_arcs=71 acc_final=0.9748 acc_hmm=0.9748 acc_cls=0.9580 total=0.07s",
+  "2026-11-18 12:34:12,313 | INFO | POST /predict from 127.0.0.1 -> 200 in 75 ms",
+  "INFO:     127.0.0.1:65295 - \"POST /predict HTTP/1.1\" 200 OK",
+  "2026-11-18 12:34:12,315 | INFO | POST /predict from 127.0.0.1 -> 404 in 1 ms",
+  "INFO:     127.0.0.1:65296 - \"POST /predict HTTP/1.1\" 404 Not Found",
   "INFO:     Shutting down",
   "INFO:     Waiting for application shutdown.",
   "INFO:     Application shutdown complete.",
-  "INFO:     Finished server process [13290]"
+  "INFO:     Finished server process [65897]"
  ]
 }

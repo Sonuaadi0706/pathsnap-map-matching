@@ -39,6 +39,9 @@ class HMMParams:
     back_tol_m: float = 15.0    # tolerated backward motion along the same arc
     back_pen_m: float = 60.0    # extra cost for larger backward motion on same arc
     sp_limit_m: float = 3000.0  # Dijkstra search limit
+    top_m: int = 0              # keep only the classifier's top-M candidates per fix as states (0 = all)
+    uturn_pen: float = 0.0      # extra log-penalty for switching to the opposite-direction arc
+    realign_max_m: float = 80.0  # re-alignment keeps the Viterbi arc beyond this distance
 
 
 class RoadGraph:
@@ -92,6 +95,13 @@ class RoadGraph:
 
     def path_arcs(self, a_from, a_to, limit=5000.0):
         """Arc ids strictly between arc a_from and arc a_to along the shortest path."""
+        key = (int(a_from), int(a_to))
+        cache = self.__dict__.setdefault("_fill_cache", {})
+        if key not in cache:
+            cache[key] = self._path_arcs(a_from, a_to, limit)
+        return cache[key]
+
+    def _path_arcs(self, a_from, a_to, limit=5000.0):
         s = self.node_idx[self.arcs[a_from, 1]]
         t = self.node_idx[self.arcs[a_to, 0]]
         if s == t:
@@ -106,42 +116,53 @@ class RoadGraph:
         return [self.uv2arc[(int(path[k]), int(path[k + 1]))] for k in range(len(path) - 1)]
 
 
-def decode(trip, cands, params: HMMParams = HMMParams(), score_col="pn", graph=None):
-    """cands: DataFrame (obs, arc, t_proj, <score_col>) for ONE trip.
-    Returns (pred_arc per observation (-1 = none), segment id per observation, graph)."""
+class Prep:
+    """Parameter-independent part of decoding for one trip: states, emissions (unweighted log
+    probabilities), consecutive-fix links and the shortest-path distance of every candidate pair.
+    Computed once; viterbi() can then be run cheaply for many decoder parameter settings."""
+    PREP_GAP_S = 300.0   # links are prepared up to this gap; viterbi() applies params.gap_s (<= this)
+
+
+def prepare(trip, cands, params: HMMParams = HMMParams(), score_col="pn", graph=None):
     n = trip.n_obs
     xy, t = trip.xy, trip.track[:, 2]
     c = cands.sort_values(["obs", score_col], ascending=[True, False])
-    obs = c.obs.to_numpy()
-    arc = c.arc.to_numpy()
-    tp = c.t_proj.to_numpy().astype(float)
-    logp = params.w_emit * np.log(np.clip(c[score_col].to_numpy(), 1e-6, 1.0))
-    starts = np.searchsorted(obs, np.arange(n))
-    ends = np.searchsorted(obs, np.arange(n), side="right")
-    g = graph or RoadGraph(trip, np.unique(arc))
-    L = g.alen
-
-    # gather all consecutive transition pairs to batch the shortest paths
-    gc = np.r_[np.linalg.norm(np.diff(xy, axis=0), axis=1), 0]
-    dt = np.r_[np.diff(t), 0]
-    has = ends > starts
-    link = has[:-1] & has[1:] & (dt[:-1] <= params.gap_s) & (gc[:-1] <= params.gap_m)
-    pi_src, pi_dst, pair_slices = [], [], {}
+    if params.top_m and params.top_m > 0:
+        c = c[c.groupby("obs").cumcount() < params.top_m]
+    P = Prep()
+    P.n, P.trip = n, trip
+    P.obs = obs = c.obs.to_numpy()
+    P.arc = arc = c.arc.to_numpy()
+    P.tp = c.t_proj.to_numpy().astype(float)
+    P.logq = np.log(np.clip(c[score_col].to_numpy(), 1e-6, 1.0))
+    P.starts = starts = np.searchsorted(obs, np.arange(n))
+    P.ends = ends = np.searchsorted(obs, np.arange(n), side="right")
+    P.g = g = graph or RoadGraph(trip, np.unique(arc))
+    P.gc = gc = np.r_[np.linalg.norm(np.diff(xy, axis=0), axis=1), 0]
+    P.dt = dt = np.r_[np.diff(t), 0]
+    P.has = has = ends > starts
+    gap_s = max(params.gap_s, Prep.PREP_GAP_S)
+    P.link = link = has[:-1] & has[1:] & (dt[:-1] <= gap_s) & (gc[:-1] <= params.gap_m)
+    pi_src, pi_dst, P.pair_slices = [], [], {}
     off = 0
     for i in np.where(link)[0]:
         A = arc[starts[i]:ends[i]]
         B = arc[starts[i + 1]:ends[i + 1]]
-        src = np.repeat(trip.arcs[A, 1], len(B))
-        dst = np.tile(trip.arcs[B, 0], len(A))
-        pi_src.append(src)
-        pi_dst.append(dst)
-        pair_slices[i] = (off, off + len(src))
-        off += len(src)
-    if off:
-        SP = g.pair_distances(np.concatenate(pi_src), np.concatenate(pi_dst), params.sp_limit_m)
-    else:
-        SP = np.zeros(0)
+        pi_src.append(np.repeat(trip.arcs[A, 1], len(B)))
+        pi_dst.append(np.tile(trip.arcs[B, 0], len(A)))
+        P.pair_slices[i] = (off, off + len(A) * len(B))
+        off += len(A) * len(B)
+    P.SP = g.pair_distances(np.concatenate(pi_src), np.concatenate(pi_dst), params.sp_limit_m) if off else np.zeros(0)
+    return P
 
+
+def viterbi(P, params: HMMParams = HMMParams()):
+    """Viterbi over prepared states. Returns (arc per observation, -1 = none; chain id per observation)."""
+    n, trip, arc, tp, starts, ends, has, g = P.n, P.trip, P.arc, P.tp, P.starts, P.ends, P.has, P.g
+    L, gc, dt, SP = g.alen, P.gc, P.dt, P.SP
+    frm, to = trip.arcs[:, 0], trip.arcs[:, 1]
+    logp = params.w_emit * P.logq
+    link = P.link & (dt[:-1] <= params.gap_s)
     pred = -np.ones(n, dtype=np.int64)
     seg = -np.ones(n, dtype=np.int64)
     seg_id = 0
@@ -180,7 +201,7 @@ def decode(trip, cands, params: HMMParams = HMMParams(), score_col="pn", graph=N
         B = arc[starts[i]:ends[i]]
         ta = tp[starts[i - 1]:ends[i - 1]]
         tb = tp[starts[i]:ends[i]]
-        s0, s1 = pair_slices[i - 1]
+        s0, s1 = P.pair_slices[i - 1]
         sp = SP[s0:s1].reshape(len(A), len(B))
         r = (1 - ta)[:, None] * L[A][:, None] + sp + (tb * L[B])[None, :]
         same = A[:, None] == B[None, :]
@@ -190,20 +211,30 @@ def decode(trip, cands, params: HMMParams = HMMParams(), score_col="pn", graph=N
         tr = -np.abs(r - gc[i - 1]) / params.beta
         speed = r / max(dt[i - 1], 1e-3)
         tr = tr - np.maximum(0.0, speed - params.v_max) / 5.0
+        if params.uturn_pen:
+            rev = (frm[A][:, None] == to[B][None, :]) & (to[A][:, None] == frm[B][None, :])
+            tr = tr - params.uturn_pen * rev
         tr[~np.isfinite(r)] = NEG
         cand = delta[:, None] + tr
         best = cand.argmax(0)
-        newd = cand[best, np.arange(len(B))] + e
         if np.all(cand.max(0) <= NEG / 2):  # disconnected: break the chain
             backtrack(i - 1, delta)
             seg_id += 1
             delta, cur_start, back = e.copy(), i, {}
             continue
         back[i] = best
-        delta = newd
+        delta = cand[best, np.arange(len(B))] + e
     if delta is not None:
         backtrack(n - 1, delta)
-    return pred, seg, g
+    return pred, seg
+
+
+def decode(trip, cands, params: HMMParams = HMMParams(), score_col="pn", graph=None):
+    """cands: DataFrame (obs, arc, t_proj, <score_col>) for ONE trip.
+    Returns (pred_arc per observation (-1 = none), segment id per observation, graph)."""
+    P = prepare(trip, cands, params, score_col, graph)
+    pred, seg = viterbi(P, params)
+    return pred, seg, P.g
 
 
 def reconstruct_route(pred, seg, graph, fill=True):

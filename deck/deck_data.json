@@ -1,4 +1,307 @@
 {
+ "r2": {
+  "variants": [
+   {
+    "variant": "A0 reference: v1 candidates, v1 features, binary",
+    "cv_top1": 0.9044144821131125,
+    "cv_macro_f1": 0.8671853732952035,
+    "objective": "binary",
+    "n_features": 28
+   },
+   {
+    "variant": "A1 v2 candidates (K=24), v1 features, binary",
+    "cv_top1": 0.9031677481950279,
+    "cv_macro_f1": 0.8673452391010528,
+    "objective": "binary",
+    "n_features": 28
+   },
+   {
+    "variant": "B  v2 candidates, v2 features, binary",
+    "cv_top1": 0.9129357297117267,
+    "cv_macro_f1": 0.8888808924916803,
+    "objective": "binary",
+    "n_features": 46
+   },
+   {
+    "variant": "C1 v2 features, lambdarank",
+    "cv_top1": 0.9196056759361152,
+    "cv_macro_f1": 0.8954066289845475,
+    "objective": "lambdarank",
+    "n_features": 46
+   },
+   {
+    "variant": "C2 v2 features, rank_xendcg (listwise softmax)",
+    "cv_top1": 0.9119421716762011,
+    "cv_macro_f1": 0.87783391083914,
+    "objective": "rank_xendcg",
+    "n_features": 46
+   },
+   {
+    "variant": "D  lambdarank, v2 features, all fixes (stride 1)",
+    "cv_top1": 0.9190727393955462,
+    "cv_macro_f1": 0.8979871556329005,
+    "objective": "lambdarank",
+    "n_features": 46
+   }
+  ],
+  "scorer": {
+   "cv_top1": 0.9196056759361152,
+   "cv_f1": 0.8954066289845475,
+   "train_top1": 0.9806011835452926,
+   "test_top1": 0.9324797491507708,
+   "test_f1": 0.9078927583660186,
+   "test_ll": 0.19766793040315794,
+   "n_features": 46
+  },
+  "r1_scorer": {
+   "cv_top1": 0.9044144821131125,
+   "cv_f1": 0.8671853732952035,
+   "test_top1": 0.9105304415991639,
+   "test_f1": 0.862894443291383,
+   "test_ll": 0.2522276251354006
+  },
+  "optuna2": {
+   "n_trials": 40,
+   "selected": "lgbm_v2_untuned",
+   "reason": "CV top-1 tie (<0.001); untuned has the smaller train-validation gap"
+  },
+  "decoder": {
+   "n_trials": 64,
+   "best": {
+    "beta": 6.441931752094279,
+    "w_emit": 0.23740410184768843,
+    "back_tol_m": 36.946869024200026,
+    "back_pen_m": 136.14759116522796,
+    "uturn_pen": 4.763130000047359,
+    "gap_s": 283.1115499396612,
+    "top_m": 8,
+    "realign_max_m": 97.27292274370694
+   }
+  },
+  "test": {
+   "cls": {
+    "top1": 0.9324797491507708,
+    "macro_f1": 0.9078927583660186,
+    "continuity": 0.9595112862550164
+   },
+   "hmm": {
+    "top1": 0.9608048079435589,
+    "macro_f1": 0.9556404872813463,
+    "continuity": 0.9797575302649861
+   },
+   "final": {
+    "top1": 0.9807682257643062,
+    "macro_f1": 0.9814092313562746,
+    "continuity": 0.9796930641270484
+   },
+   "route_f1": 0.9929697809937705,
+   "route_precision": 0.9896631534073311,
+   "route_recall": 0.9963388403342048,
+   "mean_decode_s": 0.16742055416107177,
+   "max_decode_s": 0.49756503105163574,
+   "trip_mean_top1": 0.9806194319654491
+  },
+  "train": {
+   "cls": {
+    "top1": 0.9181911006018917,
+    "macro_f1": 0.8878266009835791,
+    "continuity": 0.9541206937166699
+   },
+   "hmm": {
+    "top1": 0.942116294067068,
+    "macro_f1": 0.9366412839605236,
+    "continuity": 0.9748508141600712
+   },
+   "final": {
+    "top1": 0.964945184866724,
+    "macro_f1": 0.9675626091656422,
+    "continuity": 0.9748682025460098
+   },
+   "route_f1": 0.9810292591081202,
+   "route_precision": 0.9725807948461987,
+   "route_recall": 0.9914081242375765,
+   "mean_decode_s": 0.2743431210517883,
+   "max_decode_s": 1.643214225769043,
+   "trip_mean_top1": 0.9651317594718976
+  },
+  "decoder_adopted": false,
+  "heldout": {
+   "round1_decoder": {
+    "n_trips": 16,
+    "trip_mean_top1": 0.9745726976767596,
+    "trip_mean_macro_f1": 0.9813503881985257,
+    "pooled_top1": 0.9769444086160196,
+    "continuity": 0.9683790153384133
+   },
+   "tuned_decoder": {
+    "n_trips": 16,
+    "trip_mean_top1": 0.9445389682622369,
+    "trip_mean_macro_f1": 0.9690152233119631,
+    "pooled_top1": 0.9378950083838514,
+    "continuity": 0.9681887555377221
+   }
+  },
+  "val": {
+   "bootstrap_resamples": 10000,
+   "train_oof": {
+    "n_trips": 80,
+    "n_fixes": 186080,
+    "round1_final_top1": {
+     "point": 0.9572334479793637,
+     "ci95": [
+      0.9334399911235132,
+      0.9735907457855846
+     ]
+    },
+    "final_top1": {
+     "point": 0.964945184866724,
+     "ci95": [
+      0.9457183040645836,
+      0.9796680871713698
+     ]
+    },
+    "difference": {
+     "point": 0.007711736887360275,
+     "ci95": [
+      0.0026748186836748956,
+      0.014557276029542059
+     ],
+     "prob_improvement": 0.9996
+    },
+    "trips_better": 43,
+    "trips_worse": 13,
+    "trips_equal": 24,
+    "worst_trip_final": {
+     "trip": "00000033",
+     "top1": 0.541501976284585
+    }
+   },
+   "student_test": {
+    "n_trips": 10,
+    "n_fixes": 19135,
+    "round1_final_top1": {
+     "point": 0.9747060360595767,
+     "ci95": [
+      0.9601724057220171,
+      0.9869120191428328
+     ]
+    },
+    "final_top1": {
+     "point": 0.9807682257643062,
+     "ci95": [
+      0.9674608819345661,
+      0.991681526715834
+     ]
+    },
+    "difference": {
+     "point": 0.006062189704729553,
+     "ci95": [
+      0.0029885187177476264,
+      0.00830422711022102
+     ],
+     "prob_improvement": 1.0
+    },
+    "trips_better": 7,
+    "trips_worse": 0,
+    "trips_equal": 3,
+    "worst_trip_final": {
+     "trip": "00000009",
+     "top1": 0.9418493803622497
+    }
+   },
+   "label_sensitivity_student_test": {
+    "labels_changed_by_direction_term": 401,
+    "scored_fixes_geometry_only": 19135,
+    "scored_fixes_direction_aware": 19135,
+    "round1_final_top1": {
+     "geometry_only_labels": 0.9747060360595767,
+     "direction_aware_labels": 0.9601254246145806
+    },
+    "final_top1": {
+     "geometry_only_labels": 0.9807682257643062,
+     "direction_aware_labels": 0.9651946694538803
+    }
+   },
+   "independent_recomputation": {
+    "final_top1_from_pipeline": 0.9807682257643062,
+    "final_top1_from_tuning_csv": 0.9807682257643062,
+    "match": true
+   },
+   "predictions_identical_without_route_files": true
+  },
+  "pertrip": [
+   {
+    "trip": "00000000",
+    "cls": 0.9672393128246105,
+    "hmm": 0.9840191769876149,
+    "final": 0.9928086296444267,
+    "r1_final": 0.98921294446664
+   },
+   {
+    "trip": "00000007",
+    "cls": 0.9881831610044313,
+    "hmm": 0.9992614475627769,
+    "final": 1.0,
+    "r1_final": 1.0
+   },
+   {
+    "trip": "00000009",
+    "cls": 0.9056244041944709,
+    "hmm": 0.9304099142040038,
+    "final": 0.9418493803622497,
+    "r1_final": 0.9332697807435653
+   },
+   {
+    "trip": "00000040",
+    "cls": 0.9636060100166944,
+    "hmm": 0.9813021702838064,
+    "final": 0.9913188647746244,
+    "r1_final": 0.988313856427379
+   },
+   {
+    "trip": "00000052",
+    "cls": 0.9885496183206107,
+    "hmm": 0.9961832061068703,
+    "final": 1.0,
+    "r1_final": 1.0
+   },
+   {
+    "trip": "00000056",
+    "cls": 0.9491482329010933,
+    "hmm": 0.9855072463768116,
+    "final": 0.9903381642512077,
+    "r1_final": 0.9801678108314263
+   },
+   {
+    "trip": "00000065",
+    "cls": 0.90234375,
+    "hmm": 0.9088541666666666,
+    "final": 0.9791666666666666,
+    "r1_final": 0.9752604166666666
+   },
+   {
+    "trip": "00000076",
+    "cls": 0.9616419919246298,
+    "hmm": 0.9872139973082099,
+    "final": 0.9966352624495289,
+    "r1_final": 0.9899057873485868
+   },
+   {
+    "trip": "00000077",
+    "cls": 0.8504218869854258,
+    "hmm": 0.9030938378931219,
+    "final": 0.9575556123753516,
+    "r1_final": 0.9483508054206086
+   },
+   {
+    "trip": "00000091",
+    "cls": 0.9244851258581236,
+    "hmm": 0.9382151029748284,
+    "final": 0.9565217391304348,
+    "r1_final": 0.9565217391304348
+   }
+  ]
+ },
  "team": {},
  "final": {
   "test": {
@@ -43,30 +346,30 @@
   },
   "errors": {
    "cls_pred": {
-    "n_errors": 1712,
-    "error_rate": 0.08946955840083616,
-    "adjacent_on_route": 382,
-    "reverse_direction": 568,
-    "other_on_route": 88,
-    "off_route": 674,
+    "n_errors": 1292,
+    "error_rate": 0.06752025084922916,
+    "adjacent_on_route": 432,
+    "reverse_direction": 336,
+    "other_on_route": 94,
+    "off_route": 430,
     "no_prediction": 0
    },
    "hmm_pred": {
-    "n_errors": 912,
-    "error_rate": 0.04766135354063235,
-    "adjacent_on_route": 345,
-    "reverse_direction": 312,
-    "other_on_route": 25,
-    "off_route": 230,
+    "n_errors": 750,
+    "error_rate": 0.03919519205644108,
+    "adjacent_on_route": 499,
+    "reverse_direction": 85,
+    "other_on_route": 48,
+    "off_route": 118,
     "no_prediction": 0
    },
    "final_pred": {
-    "n_errors": 484,
-    "error_rate": 0.025293963940423308,
-    "adjacent_on_route": 83,
-    "reverse_direction": 150,
-    "other_on_route": 15,
-    "off_route": 236,
+    "n_errors": 368,
+    "error_rate": 0.019231774235693756,
+    "adjacent_on_route": 60,
+    "reverse_direction": 118,
+    "other_on_route": 28,
+    "off_route": 162,
     "no_prediction": 0
    }
   },
@@ -74,11 +377,11 @@
    "moving_scored_fixes": 16354,
    "label_against_motion": 257,
    "share": 0.01571480983245689,
-   "final_reverse_direction_errors_while_moving": 66,
-   "of_which_label_against_motion": 39
+   "final_reverse_direction_errors_while_moving": 38,
+   "of_which_label_against_motion": 17
   },
   "identical_without_route": true,
-  "api_max_s": 1.27,
+  "api_max_s": 1.6,
   "api_ok": 10,
   "pertrip": [
    {
@@ -540,34 +843,34 @@
  ],
  "smoke": {
   "00000009": {
-   "seconds": 0.4,
+   "seconds": 0.53,
    "n_observations": 1049,
    "n_matched": 1049,
-   "route_arcs": 442,
+   "route_arcs": 435,
    "route_ids_valid": true,
    "route_consecutive_connected": 1.0,
    "hmm_segments": 1,
    "obs_count_matches_file": true,
    "no_reference_fields": true,
    "evaluation_available": true,
-   "acc_final": 0.9332697807435653,
-   "acc_hmm": 0.9227836034318398,
-   "acc_cls": 0.8903717826501429
+   "acc_final": 0.9418493803622497,
+   "acc_hmm": 0.9304099142040038,
+   "acc_cls": 0.9056244041944709
   },
   "00000077": {
-   "seconds": 0.82,
+   "seconds": 1.14,
    "n_observations": 3911,
    "n_matched": 3911,
-   "route_arcs": 354,
+   "route_arcs": 312,
    "route_ids_valid": true,
    "route_consecutive_connected": 1.0,
    "hmm_segments": 1,
    "obs_count_matches_file": true,
    "no_reference_fields": true,
    "evaluation_available": true,
-   "acc_final": 0.9483508054206086,
-   "acc_hmm": 0.8954231654308361,
-   "acc_cls": 0.8031194068013295
+   "acc_final": 0.9575556123753516,
+   "acc_hmm": 0.9030938378931219,
+   "acc_cls": 0.8504218869854258
   },
   "checks": {
    "trips_listed": true,

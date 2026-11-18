@@ -325,3 +325,74 @@ for m in ["lgbm", "lgbm_tuned"]:
     fig.savefig(FIG / f"feat_importance_{m}.png")
     plt.close(fig)
 print("feature importance written")
+
+# ---------------- round 2: variant ladder, second Bayesian search, decoder tuning, final ladder ----------------
+if (RES / "final_summary.json").exists():
+    V = pd.read_csv(RES / "tune_v2_variants.csv")
+    lab = ["A0  v1 cand.\nv1 feat.\nbinary", "A1  K=24\nv1 feat.\nbinary", "B  K=24\nv2 feat.\nbinary", "C1  v2 feat.\nlambdarank",
+           "C2  v2 feat.\nrank_xendcg", "D  lambdarank\nall fixes"]
+    fig, ax = plt.subplots(figsize=(8.6, 3.6))
+    xx = np.arange(len(V))
+    b1 = ax.bar(xx - w / 2, V.cv_top1, w, yerr=V.cv_top1_std, color=ps.INK, capsize=3, error_kw=dict(ecolor=ps.MID, lw=1), label="CV top-1")
+    b2 = ax.bar(xx + w / 2, V.cv_macro_f1, w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="CV macro-F1")
+    for b_, v_ in zip(b1, V.cv_top1):
+        ax.annotate(f"{v_:.4f}", (b_.get_x() + b_.get_width() / 2, 0.842), ha="center", fontsize=7, color="white", rotation=90, va="bottom")
+    ps.label_bars(ax, b2, fmt="{:.3f}", size=7)
+    ax.set_xticks(xx, lab[:len(V)], fontsize=7)
+    ax.set_ylim(0.84, 0.96)
+    ax.set_title("Round 2: candidate set, features and objective (same 5 trip-grouped folds, 80 training trips)")
+    ax.legend(loc="upper left", ncol=2, fontsize=8)
+    fig.savefig(FIG / "v2_variants.png")
+    plt.close(fig)
+
+    o2 = json.load(open(RES / "optuna_v2_best.json"))
+    t2 = pd.read_csv(RES / "optuna_v2_trials.csv")
+    t2 = t2[t2.state == "COMPLETE"]
+    fig, ax = plt.subplots(figsize=(7, 3.2))
+    ax.scatter(t2.number, t2.value, s=18, color=ps.MID, label="trial CV top-1")
+    ax.plot(t2.number, t2.value.cummax(), color=ps.INK, label="best so far")
+    ax.axhline(o2["untuned_same_protocol"]["cv_top1"], color=ps.INK, ls=":", lw=1.2, label="untuned config")
+    ax.set_xlabel("trial")
+    ax.set_ylabel("CV observation top-1")
+    ax.set_title(f"Round-2 Optuna TPE search, LambdaRank + v2 features ({len(t2)} trials)")
+    ax.legend(loc="lower right")
+    fig.savefig(FIG / "optuna_v2_history.png")
+    plt.close(fig)
+
+    dt_ = pd.read_csv(RES / "decoder_trials.csv")
+    dt_ = dt_[dt_.state == "COMPLETE"]
+    db = json.load(open(RES / "decoder_best.json"))
+    fig, ax = plt.subplots(figsize=(7, 3.2))
+    ax.scatter(dt_.number, dt_.value, s=18, color=ps.MID, label="trial: mean per-trip final top-1")
+    ax.plot(dt_.number, dt_.value.cummax(), color=ps.INK, label="best so far")
+    ax.axhline(db["round1_tuning_trip_mean_top1"], color=ps.INK, ls=":", lw=1.2, label="round-1 decoder setting")
+    ax.set_ylim(max(dt_.value.min(), db["round1_tuning_trip_mean_top1"] - 0.02), dt_.value.max() + 0.002)
+    ax.set_xlabel("trial")
+    ax.set_ylabel("mean per-trip final top-1, 64 tuning trips")
+    ax.set_title(f"Bayesian decoder tuning (Optuna TPE, {len(dt_)} trials)")
+    ax.legend(loc="lower right")
+    fig.savefig(FIG / "decoder_tuning_history.png")
+    plt.close(fig)
+
+    fs = json.load(open(RES / "final_summary.json"))
+    r1 = json.load(open(RES / "realign_summary.json"))
+    base = json.load(open(RES / "baseline_nearest.json"))
+    stages = ["nearest\nsegment", "R1 scorer\n(v1 feat.)", "R1 + HMM", "R1 final\n(+ re-align)", "R2 scorer\n(v2 feat., rank)", "R2 + HMM", "R2 final"]
+    te = [base["student_test"]["obs_top1"], r1["student_test"]["cls"]["top1"], r1["student_test"]["hmm"]["top1"], r1["student_test"]["realign"]["top1"],
+          fs["student_test"]["final_decoder"]["cls"]["top1"], fs["student_test"]["final_decoder"]["hmm"]["top1"], fs["student_test"]["final_decoder"]["final"]["top1"]]
+    trn = [base["cv_mean"]["obs_top1"], r1["train"]["cls"]["top1"], r1["train"]["hmm"]["top1"], r1["train"]["realign"]["top1"],
+           fs["train"]["final_decoder"]["cls"]["top1"], fs["train"]["final_decoder"]["hmm"]["top1"], fs["train"]["final_decoder"]["final"]["top1"]]
+    fig, ax = plt.subplots(figsize=(9, 3.6))
+    xx = np.arange(len(stages))
+    b1 = ax.bar(xx - w / 2, trn, w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="80 training trips (CV / out-of-fold)")
+    b2 = ax.bar(xx + w / 2, te, w, color=ps.INK, label="10 student-test trips")
+    ps.label_bars(ax, b1, size=7)
+    ps.label_bars(ax, b2, size=7)
+    ax.set_xticks(xx, stages, fontsize=8)
+    ax.set_ylim(0.5, 1.03)
+    ax.set_ylabel("observation top-1")
+    ax.set_title("Accuracy ladder: every stage on the same trips and labels")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2, fontsize=8)
+    fig.savefig(FIG / "final_ladder.png")
+    plt.close(fig)
+    print("round-2 figures written")

@@ -8,7 +8,8 @@ For every scored fix where a prediction differs from the label, classify the err
 Label-noise check: share of moving fixes (speed > 3 m/s) whose LABEL arc points against the GPS
 direction of travel (cos < -0.5) -- labels come from a geometry-only alignment and cannot be verified.
 Also verifies that predictions are identical when the .route files are physically absent.
-output: results/error_breakdown.json
+usage: python scripts/error_analysis.py [round1]
+output: results/error_breakdown.json (final system) or results/error_breakdown_round1.json
 """
 import json
 import shutil
@@ -23,7 +24,9 @@ sys.path.insert(0, str(ROOT))
 from pathsnap.data import DEFAULT_DATA_ROOT, list_trips, load_route  # noqa: E402
 from pathsnap.pipeline import Predictor  # noqa: E402
 
-P = Predictor()
+ROUND1 = len(sys.argv) > 1 and sys.argv[1] == "round1"     # "round1": analyse the round-1 system instead
+P = Predictor(config=ROOT / "configs/round1_config.json") if ROUND1 else Predictor()
+OUT = ROOT / ("results/error_breakdown_round1.json" if ROUND1 else "results/error_breakdown.json")
 tmp = Path(tempfile.mkdtemp(prefix="pathsnap_noroute_"))
 cats = ["adjacent_on_route", "reverse_direction", "other_on_route", "off_route", "no_prediction"]
 count = {s: dict.fromkeys(cats, 0) for s in ["cls_pred", "hmm_pred", "final_pred"]}
@@ -84,5 +87,5 @@ out = {"n_scored_fixes": n_scored, "predictions_identical_without_route_files": 
                        "final_reverse_direction_errors_while_moving": rev_err_moving,
                        "of_which_label_against_motion": rev_err_moving_label_against},
        "per_trip": per_trip}
-json.dump(out, open(ROOT / "results/error_breakdown.json", "w"), indent=1)
+json.dump(out, open(OUT, "w"), indent=1)
 print(json.dumps({k: v for k, v in out.items() if k != "per_trip"}, indent=1))

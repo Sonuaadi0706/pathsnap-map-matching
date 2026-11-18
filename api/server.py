@@ -71,7 +71,7 @@ async def log_requests(request: Request, call_next):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": predictor.cfg["model"], "partition": PARTITION}
+    return {"status": "ok", "model": predictor.cfg.get("display_name", predictor.cfg["model"]), "partition": PARTITION}
 
 
 @app.get("/trips")
@@ -108,7 +108,7 @@ def predict(req: PredictRequest):
              tid, trip.n_obs, len(route), acc("final"), acc("hmm"), acc("classifier_only"), out["timings"]["total_s"])
     return {
         "trip_id": tid,
-        "model": predictor.cfg["model"],
+        "model": predictor.cfg.get("display_name", predictor.cfg["model"]),
         "n_observations": trip.n_obs,
         "n_matched_observations": int((final_pred >= 0).sum()),
         "n_route_arcs": int(len(route)),

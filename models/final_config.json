@@ -1,13 +1,21 @@
 {
- "model": "lgbm_tuned",
+ "model": "lgbm_v2_untuned",
+ "display_name": "LightGBM LambdaRank (v2 features)",
+ "feature_set": "v2",
  "hmm_params": {
   "beta": 20.0,
-  "w_emit": 0.25
+  "w_emit": 0.25,
+  "back_tol_m": 15.0,
+  "back_pen_m": 60.0,
+  "uturn_pen": 0.0,
+  "gap_s": 60.0,
+  "top_m": 24,
+  "realign_max_m": 80.0
  },
+ "realign": true,
  "selection": {
-  "model": "best CV macro-F1/top-1 + log loss among six families (results/comparison_table.csv); Optuna TPE config (results/optuna_best.json)",
-  "hmm": "grid on training-trip OOF scores (results/hmm_grid.csv)",
-  "realign": "monotone re-alignment of fixes to the predicted route; kept because it raised training-trip OOF top-1 0.9377 -> 0.9572 (results/realign_summary.json)"
- },
- "realign": true
+  "scorer": "round-2 scorer chosen by 5-fold trip-grouped CV (results/tune_v2_variants.csv, results/final_choice.json); hyperparameters = round-1 Bayesian-tuned values, kept after the round-2 search tied (results/optuna_v2_best.json, optuna_v2_promotion.csv)",
+  "decoder": "round-1 setting kept: Bayesian decoder tuning and a 2-parameter grid did not pass the held-out-training-trips rule (results/decoder_best.json, final_summary.json)",
+  "realign": "selected on training OOF in round 1 (results/realign_summary.json)"
+ }
 }

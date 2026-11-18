@@ -22,6 +22,20 @@ FEATURES = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# v2 candidate/feature configuration (second tuning round; v1 above is kept
+# unchanged so the six-model benchmark stays reproducible)
+V2 = dict(radius=80.0, max_k=24, k_samples=192)
+FEATURES_V2 = FEATURES + [
+    "d_prev5", "d_next5", "d_prev15", "d_next15",            # asymmetric temporal context
+    "d_win5_gap", "d_win15_gap", "d_prev5_gap", "d_next5_gap",  # context distance relative to best candidate
+    "d_win5_rank", "cos_win_gap",                              # rank / gap of context evidence within the fix
+    "cos_head_w20", "prog8", "disp20",                        # long-baseline direction (robust at stops)
+    "t_raw", "t_prev5", "t_next5",                            # along-arc position of the fix and its neighbours
+    "win_nearest_share", "win_cand_share",                    # how often neighbours agree on this arc
+]
+
+
 class ArcIndex:
     """KD-tree over densified arc samples (restricted to the track bbox)."""
 
@@ -61,14 +75,14 @@ def _gps_heading(xy, t, half=2):
     return v, speed
 
 
-def build_candidates(trip, radius=RADIUS_M, max_k=MAX_K, index=None):
+def build_candidates(trip, radius=RADIUS_M, max_k=MAX_K, index=None, k_samples=96, v2=False):
     """Return a DataFrame with one row per (observation, candidate arc) and the
     feature columns in FEATURES. Original trip id and arc id are preserved."""
     xy, t = trip.xy, trip.track[:, 2]
     n = len(xy)
     idx = index or ArcIndex(trip)
     a, b = idx.a, idx.b
-    obs, arc = idx.query(xy, radius)
+    obs, arc = idx.query(xy, radius, k_samples=k_samples)
     d, tc, traw = point_segment(xy[obs, 0], xy[obs, 1], a[arc, 0], a[arc, 1], b[arc, 0], b[arc, 1])
     df = pd.DataFrame({"obs": obs, "arc": arc, "d": d, "t_proj": tc,
                        "t_outside": np.abs(traw - tc)})
@@ -144,9 +158,42 @@ def build_candidates(trip, radius=RADIUS_M, max_k=MAX_K, index=None):
     dtn = np.diff(t, append=t[-1])
     df["gap_prev"] = dtp[obs]
     df["gap_next"] = dtn[obs]
+    if v2:
+        def dist_t(off):
+            j = np.clip(obs + off, 0, n - 1)
+            dd, _, traw = point_segment(xy[j, 0], xy[j, 1], a[arc, 0], a[arc, 1], b[arc, 0], b[arc, 1])
+            return dd, traw
+        df["d_prev5"] = np.mean([dist_to(o) for o in (-5, -4, -3, -2, -1)], axis=0)
+        df["d_next5"] = np.mean([dist_to(o) for o in (1, 2, 3, 4, 5)], axis=0)
+        df["d_prev15"] = np.mean([dist_to(o) for o in (-15, -12, -9, -6, -3)], axis=0)
+        df["d_next15"] = np.mean([dist_to(o) for o in (3, 6, 9, 12, 15)], axis=0)
+        grp = df.groupby("obs")
+        for c in ["d_win5", "d_win15", "d_prev5", "d_next5"]:
+            df[c + "_gap"] = df[c] - grp[c].transform("min")
+        df["d_win5_rank"] = grp["d_win5"].rank(method="first").astype(np.float32) - 1
+        df["cos_win_gap"] = grp["cos_head_win"].transform("max") - df["cos_head_win"]
+        v20, _ = _gps_heading(xy, t, 20)
+        g20 = v20[obs]
+        g20n = np.linalg.norm(g20, axis=1)
+        df["cos_head_w20"] = np.where((g20n > 1e-6) & (alen > 1e-6), (g20 * av).sum(1) / np.maximum(g20n * alen, 1e-9), 0.0)
+        df["disp20"] = np.minimum(g20n, 2000.0)
+        df["prog8"] = np.where(alen > 1e-6, (g8 * av).sum(1) / np.maximum(alen, 1e-9), 0.0).clip(-500, 500)
+        _, traw0 = dist_t(0)
+        df["t_raw"] = np.clip(traw0, -3, 4)
+        df["t_prev5"] = np.clip(dist_t(-5)[1], -6, 7)
+        df["t_next5"] = np.clip(dist_t(5)[1], -6, 7)
+        offs = (-5, -4, -3, -2, -1, 1, 2, 3, 4, 5)
+        df["win_nearest_share"] = np.mean([nearest[np.clip(obs + o, 0, n - 1)] == arc for o in offs], axis=0)
+        A_ = len(trip.arcs) + 1
+        keys = np.sort(obs.astype(np.int64) * A_ + arc)
+        def member(off):
+            j = np.clip(obs + off, 0, n - 1).astype(np.int64) * A_ + arc
+            pos = np.clip(np.searchsorted(keys, j), 0, len(keys) - 1)
+            return keys[pos] == j
+        df["win_cand_share"] = np.mean([member(o) for o in (-10, -5, -3, -1, 1, 3, 5, 10)], axis=0)
     df.insert(0, "trip", trip.trip_id)
     df["d_rank"] = df["d_rank"].astype(np.int16)
-    for c in FEATURES:
+    for c in (FEATURES_V2 if v2 else FEATURES):
         if df[c].dtype == np.float64:
             df[c] = df[c].astype(np.float32)
     return df

@@ -18,7 +18,7 @@ def bearing(dx, dy):
     return np.arctan2(dy, dx)
 
 
-def monotone_align(xy, a, b):
+def monotone_align(xy, a, b, extra_cost=None):
     """Assign each point to one segment of an ORDERED segment sequence (a[j]->b[j]) such that the segment
     index never decreases along the track and the summed point-segment distance is minimal (dynamic
     programme, O(n*m)). Returns (segment index per point, distance per point).
@@ -33,6 +33,8 @@ def monotone_align(xy, a, b):
     for i in range(n):
         d, _, _ = point_segment(xy[i, 0], xy[i, 1], a[:, 0], a[:, 1], b[:, 0], b[:, 1])
         dist_rows[i] = d
+        if extra_cost is not None:      # e.g. a direction penalty; reported distance stays geometric
+            d = d + extra_cost(i)
         if prev is None:
             cur = d.astype(np.float64)
             back[i] = ar

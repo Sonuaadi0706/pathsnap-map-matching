@@ -31,7 +31,29 @@ re_ = J("realign_summary.json")
 err = J("error_breakdown.json")
 api = pd.read_csv(RES / "api_all_trips.csv", dtype={"trip": str})
 rt = pd.read_csv(RES / "realign_test.csv", dtype={"trip": str})
+fs = J("final_summary.json")
+choice = J("final_choice.json")
+m2 = J(f"model_{choice['selected']}.json")
+val = J("validation_final.json")
+var = pd.read_csv(RES / "tune_v2_variants.csv")
+ft = pd.read_csv(RES / "final_test.csv", dtype={"trip": str})
+r1t = rt.set_index("trip")
 d = {
+    "r2": {"variants": var[["variant", "cv_top1", "cv_macro_f1", "objective", "n_features"]].to_dict("records"),
+           "scorer": {"cv_top1": m2["cv_mean"]["obs_top1"], "cv_f1": m2["cv_mean"]["obs_macro_f1_trip"],
+                      "train_top1": m2["cv_mean"]["train_obs_top1"], "test_top1": m2["student_test"]["obs_top1"],
+                      "test_f1": m2["student_test"]["obs_macro_f1_trip"], "test_ll": m2["student_test"]["obs_logloss"],
+                      "n_features": m2["n_features"]},
+           "r1_scorer": {"cv_top1": M["lgbm_tuned"]["cv_mean"]["obs_top1"], "cv_f1": M["lgbm_tuned"]["cv_mean"]["obs_macro_f1_trip"],
+                         "test_top1": M["lgbm_tuned"]["student_test"]["obs_top1"], "test_f1": M["lgbm_tuned"]["student_test"]["obs_macro_f1_trip"],
+                         "test_ll": M["lgbm_tuned"]["student_test"]["obs_logloss"]},
+           "optuna2": {"n_trials": J("optuna_v2_best.json")["n_trials"], "selected": choice["selected"], "reason": choice["reason"]},
+           "decoder": {"n_trials": J("decoder_best.json")["n_trials"], "best": J("decoder_best.json")["best_params"]},
+           "test": fs["student_test"]["final_decoder"], "train": fs["train"]["final_decoder"],
+           "decoder_adopted": fs["adopted_tuned_decoder"], "heldout": fs["heldout_trips"],
+           "val": val,
+           "pertrip": [{"trip": r.trip, "cls": r.cls_top1, "hmm": r.hmm_top1, "final": r.final_top1,
+                        "r1_final": float(r1t.loc[r.trip, "realign_top1"])} for r in ft.itertuples()]},
     "team": team,
     "final": {"test": re_["student_test"], "train": re_["train"], "errors": err["errors"], "label_noise": err["label_noise"],
               "identical_without_route": err["predictions_identical_without_route_files"],

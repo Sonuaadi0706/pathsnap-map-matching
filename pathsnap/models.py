@@ -137,3 +137,28 @@ def fit_model(model, X, y, X_val=None, y_val=None):
     else:
         model.fit(X, y)
     return time.time() - t0
+
+
+class CandidateScorer:
+    """Final (round-2) scorer: LightGBM model + feature list + how raw outputs become a distribution over
+    a fix's candidates. kind='binary': predict_proba renormalised per fix; kind='rank': softmax of ranking
+    scores per fix with temperature T (T fitted on training out-of-fold scores only)."""
+
+    def __init__(self, model, feats, kind, T=1.0, params=None):
+        self.model, self.feats, self.kind, self.T, self.params = model, list(feats), kind, float(T), params or {}
+
+    def raw(self, cands):
+        X = cands[self.feats].to_numpy(np.float32)
+        return self.model.predict_proba(X)[:, 1] if self.kind == "binary" else self.model.predict(X)
+
+    def score_candidates(self, cands):
+        """Return (raw score, normalised probability within each fix) for a candidate table."""
+        import pandas as pd
+        raw = self.raw(cands)
+        key = [cands.trip.to_numpy(), cands.obs.to_numpy()]
+        if self.kind == "binary":
+            s = pd.Series(np.clip(raw, 1e-6, 1.0))
+            return raw, (s / s.groupby(key).transform("sum")).to_numpy()
+        z = pd.Series(raw / self.T)
+        e = np.exp(z - z.groupby(key).transform("max"))
+        return raw, (e / e.groupby(key).transform("sum")).to_numpy()

@@ -1,33 +1,42 @@
 # PathSnap — Map-Matching & Route Reconstruction
 
 Noisy GPS trajectories → road-arc sequence. A learned candidate scorer (six
-models compared, LightGBM selected and Bayesian-tuned) feeds an HMM/Viterbi
-decoder over the directed road graph. A FastAPI backend (laptop 1) serves
+models compared, LightGBM selected, Bayesian-tuned and then refined with more
+features and a ranking objective) feeds an HMM/Viterbi decoder over the
+directed road graph. A FastAPI backend (laptop 1) serves
 predictions and computes accuracy against its private reference routes; a
 static evaluator UI (laptop 2) lists the evaluation trips, sends the selected
 trip ID and shows the predicted route and scores.
 
-## Headline results (10 student-test trips)
+## Headline results
 
-| Stage | Top-1 | Macro-F1 | Continuity |
-|---|---|---|---|
-| Nearest-segment baseline | 0.545 | 0.366 | 0.805 |
-| Tuned LightGBM (classifier only) | 0.911 | 0.863 | 0.952 |
-| + HMM/Viterbi | 0.952 | 0.941 | 0.980 |
-| + re-alignment to the predicted route (final) | **0.975** | **0.970** | **0.979** |
+| Stage | Train (CV / out-of-fold) top-1 | Student-test top-1 | Student-test macro-F1 | Continuity |
+|---|---|---|---|---|
+| Nearest-segment baseline | 0.553 | 0.545 | 0.366 | 0.805 |
+| Round 1 scorer (LightGBM binary, 28 features) | 0.903 | 0.911 | 0.863 | 0.952 |
+| Round 1 final (+ HMM/Viterbi + re-alignment) | 0.957 | 0.975 | 0.970 | 0.979 |
+| Round 2 scorer (LightGBM LambdaRank, 46 features, K=24) | 0.918 | 0.932 | 0.908 | 0.960 |
+| + HMM/Viterbi | 0.942 | 0.961 | 0.956 | 0.980 |
+| **+ re-alignment to the predicted route (deployed)** | **0.965** | **0.981** | **0.981** | **0.980** |
 
-Length-weighted route F1 of the decoded route: 0.990. The last step was selected on the 80 training
-trips with out-of-fold scores (top-1 0.938 -> 0.957). Sources:
-`results/realign_summary.json`, `results/baseline_nearest.json`, `results/error_breakdown.json`. Full analysis:
-`report/PathSnap_Technical_Report.pdf`. Labels are derived by aligning fixes to the supplied route and carry some
-noise (1.6% of moving fixes are labelled against the direction of travel).
+* Length-weighted route F1 of the deployed system: 0.993 (student-test), 0.981 (training out-of-fold).
+* Trip-bootstrap 95% interval for the deployed top-1: [0.967, 0.992] on student-test;
+  round 2 minus round 1: +0.0061 [+0.0030, +0.0083] on student-test and
+  +0.0077 [+0.0027, +0.0146] on the 80 training trips.
+* What did **not** help (kept on record): a second Bayesian search over LightGBM hyperparameters tied the existing ones; two
+  Bayesian searches over eight decoder parameters improved their tuning trips but not held-out training trips and were not adopted.
+* Labels are derived by aligning fixes to the supplied route and carry some noise (1.6% of moving fixes are
+  labelled against the direction of travel); under direction-aware labels the deployed top-1 is 0.965.
+
+Sources: `results/final_summary.json`, `results/realign_summary.json`, `results/validation_final.json`, `results/baseline_nearest.json`.
+Full analysis: `report/PathSnap_Technical_Report.pdf`.
 
 ## Repository layout
 
 | Folder | Contents |
 |---|---|
 | `pathsnap/` | library: `data.py` (I/O, projection), `labels.py` (route→observation alignment, evaluation only), `candidates.py` (candidate generation + 28 features), `dataset.py`, `models.py` (6 model definitions), `metrics.py`, `hmm.py` (HMM/Viterbi + route filling), `pipeline.py` (route-free inference), `plotstyle.py` |
-| `scripts/` | `eda.py`, `eda_plots.py`, `build_dataset.py`, `baseline.py`, `train_models.py`, `bayes_opt.py`, `hmm_eval.py`, `realign_eval.py`, `error_analysis.py`, `model_plots.py`, `make_maps.py`, `smoke_test.py`, `build_report.py` |
+| `scripts/` | `eda.py`, `eda_plots.py`, `build_dataset.py`, `baseline.py`, `train_models.py`, `bayes_opt.py`, `hmm_eval.py`, `realign_eval.py`, `error_analysis.py`, `tune_v2.py`, `bayes_opt_v2.py`, `promote_v2.py`, `train_final_v2.py`, `select_final_v2.py`, `tune_decoder.py`, `decoder_grid_v2.py`, `validate_final.py`, `model_plots.py`, `make_maps.py`, `smoke_test.py`, `build_report.py` |
 | `api/` | FastAPI server (`server.py`) and the separate server-side evaluation step (`evaluation.py`) |
 | `ui/` | evaluator UI (`index.html`, `app.js`, Leaflet) |
 | `models/` | trained models (`*.joblib`) and `final_config.json` (model + HMM parameters used by the API) |
@@ -66,7 +75,18 @@ python scripts/bayes_opt.py 40 2700 # Optuna TPE on LightGBM (trial log in resul
 python scripts/train_models.py lgbm_tuned
 python scripts/hmm_eval.py lgbm_tuned   # decoder grid on train OOF + test ablation
 python scripts/realign_eval.py      # before/after of the route re-alignment step (train OOF, then test)
-python scripts/error_analysis.py    # residual-error breakdown, label-noise check, no-.route leakage check
+python scripts/error_analysis.py round1   # round-1 system: residual errors, label noise, no-.route leakage check
+# ---- round 2 (selected family only; v1 cache/results above stay untouched)
+python scripts/build_dataset.py --v2          # candidates K=24 + 46 features -> cache_v2/
+python scripts/tune_v2.py                     # candidate set / features / objective variants on the same folds
+python scripts/train_final_v2.py lgbm_v2_untuned lambdarank 3 base     # round-2 scorer with round-1 hyperparameters
+python scripts/bayes_opt_v2.py lambdarank 40 1260                      # second Bayesian search (TPE)
+python scripts/promote_v2.py                  # re-score its top-5 trials at full fidelity
+python scripts/train_final_v2.py lgbm_v2 lambdarank 3 promoted && python scripts/select_final_v2.py
+python scripts/tune_decoder.py lgbm_v2_untuned 64   # Bayesian decoder tuning with held-out training trips (not adopted)
+python scripts/decoder_grid_v2.py lgbm_v2_untuned   # 2-parameter decoder grid under the same rule (not adopted)
+python scripts/error_analysis.py              # deployed system: residual errors + leakage check
+python scripts/validate_final.py              # trip bootstrap, label sensitivity, independent recomputation
 python scripts/model_plots.py       # comparison figures + tables
 python scripts/make_maps.py --eda train 00000002
 python scripts/make_maps.py student_test 00000009 00000077
