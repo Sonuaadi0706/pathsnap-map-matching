@@ -17,4 +17,15 @@ Student folder/
 .env
 deck/node_modules/
 cache_v2/
+archive/**/cache/
+archive/**/*.pkl
+!archive/round1_28_features/results/optuna_study.pkl
+!logs/api_requests_evaluator.log
+# local study aids and previews (not part of the submission)
+review1/
+review2/
+readable/
+models/*.joblib.txt
+archive/**/*.joblib.txt
+models/training_times.*
 !results/optuna_v2_study.pkl

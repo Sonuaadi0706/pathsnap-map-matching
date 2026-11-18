@@ -1,8 +1,8 @@
-"""Train and evaluate the round-2 scorer (v2 candidates + v2 features) with a given configuration.
+"""Train and evaluate the LightGBM ranking scorer (46-feature candidate table) with a given configuration.
 
 usage: python scripts/train_final_v2.py <name> <objective> <train_stride> [params.json key]
   name       e.g. lgbm_v2_untuned / lgbm_v2
-  params     "base" (round-1 tuned LightGBM params) or "optuna" (results/optuna_v2_best.json)
+  params     "base" (starting hyperparameters, configs/start_hyperparameters.json) or "optuna" (results/optuna_v2_best.json)
 
 Same protocol as scripts/train_models.py: 5 trip-grouped folds (results/folds.json) on the 80 training
 trips, CV metrics on every 3rd validation fix, refit on all training trips, one evaluation on the 10

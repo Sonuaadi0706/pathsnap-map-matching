@@ -1,0 +1,14 @@
+{
+ "best_params": {
+  "n_estimators": 400,
+  "learning_rate": 0.03704835800688855,
+  "num_leaves": 39,
+  "min_child_samples": 29,
+  "subsample": 0.5011582138173765,
+  "colsample_bytree": 0.49703041033104195,
+  "reg_lambda": 0.0018572637301708756,
+  "reg_alpha": 0.064742963320139,
+  "subsample_freq": 1
+ },
+ "note": "Starting hyperparameters of the LightGBM ranking scorer. They are the best configuration of an earlier Bayesian search (Optuna TPE, 40 trials) run on the archived 28-feature table: archive/round1_28_features/results/optuna_best.json. The Bayesian search on the 46-feature table (scripts/bayes_opt_v2.py) started from them and did not find a better setting."
+}

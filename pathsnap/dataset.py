@@ -4,12 +4,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .candidates import FEATURES, FEATURES_V2
+from .candidates import FEATURES
 
 ROOT = Path(__file__).resolve().parents[1]
-CACHE = ROOT / "cache"
-CACHE_V2 = ROOT / "cache_v2"
-FEATURE_SETS = {"v1": FEATURES, "v2": FEATURES_V2}
+CACHE = ROOT / "cache"          # per-trip candidate tables with the 46 features (scripts/build_dataset.py)
+CACHE_V2 = CACHE                # alias used by older script names
+FEATURE_SETS = {"v2": FEATURES}
 
 
 def load_partition(part: str, trips=None, cache=None):

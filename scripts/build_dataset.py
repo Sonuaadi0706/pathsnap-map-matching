@@ -1,4 +1,4 @@
-"""Build candidate/feature tables for all train + student_test trips.
+"""Build candidate/feature tables (80 m radius, up to 24 arcs per fix, 46 features) for all train + student_test trips.
 
 cache/feat_<partition>_<trip>.pkl   route-free candidate features
 cache/lab_<partition>_<trip>.npz    labels derived from .route (evaluation/training only)
@@ -18,15 +18,14 @@ from pathsnap.candidates import V2, build_candidates  # noqa: E402
 from pathsnap.data import list_trips, load_trip  # noqa: E402
 from pathsnap.labels import observation_labels  # noqa: E402
 
-IS_V2 = "--v2" in sys.argv
-CACHE = ROOT / ("cache_v2" if IS_V2 else "cache")
+CACHE = ROOT / "cache"
 CACHE.mkdir(exist_ok=True)
 
 
 def one(tid, part):
     t0 = time.time()
     tr = load_trip(tid, part, with_route=False)
-    feat = build_candidates(tr, v2=True, **V2) if IS_V2 else build_candidates(tr)   # route never loaded here
+    feat = build_candidates(tr, v2=True, **V2)   # route never loaded here
     t1 = time.time()
     tr_lab = load_trip(tid, part, with_route=True)
     lab, ridx, ld, rel = observation_labels(tr_lab)
@@ -51,7 +50,7 @@ if __name__ == "__main__":
     out = Parallel(n_jobs=4, verbose=5)(delayed(one)(t, p) for t, p in jobs)
     df = pd.DataFrame(out)
     (ROOT / "results").mkdir(exist_ok=True)
-    df.to_csv(ROOT / ("results/candidate_stats_v2.csv" if IS_V2 else "results/candidate_stats.csv"), index=False)
+    df.to_csv(ROOT / "results/candidate_stats.csv", index=False)
     for p, g in df.groupby("partition"):
         w = g.n_obs * g.frac_reliable
         print(p, "obs", g.n_obs.sum(), "rows", g.n_rows.sum(), "offroute", g.n_offroute.sum(),

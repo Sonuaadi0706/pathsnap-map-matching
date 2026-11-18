@@ -1,4 +1,4 @@
-"""Multi-fidelity promotion step for the round-2 Bayesian search: the search scored trials on a stride-9
+"""Multi-fidelity promotion step for the Bayesian search: the search scored trials on a stride-9
 training subsample; here the top-5 trials are re-scored with the standard protocol (every 3rd fix, same 5
 folds). The best full-fidelity configuration is written to results/optuna_v2_best.json["promoted_params"].
 output: results/optuna_v2_promotion.csv

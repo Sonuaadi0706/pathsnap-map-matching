@@ -47,7 +47,7 @@ def get_config(name):
     if name == "lgbm_tuned":
         import json
         from pathlib import Path
-        best = json.load(open(Path(__file__).resolve().parents[1] / "results" / "optuna_best.json"))
+        best = json.load(open(Path(__file__).resolve().parents[1] / "configs" / "start_hyperparameters.json"))
         return dict(family="Boosting", loss="binary log loss", **best["best_params"])
     return dict(CONFIGS[name])
 
@@ -140,7 +140,7 @@ def fit_model(model, X, y, X_val=None, y_val=None):
 
 
 class CandidateScorer:
-    """Final (round-2) scorer: LightGBM model + feature list + how raw outputs become a distribution over
+    """Deployed scorer class: LightGBM model + feature list + how raw outputs become a distribution over
     a fix's candidates. kind='binary': predict_proba renormalised per fix; kind='rank': softmax of ranking
     scores per fix with temperature T (T fitted on training out-of-fold scores only)."""
 

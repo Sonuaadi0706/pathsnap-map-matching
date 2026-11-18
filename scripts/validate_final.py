@@ -1,6 +1,6 @@
 """Validation of the final system (run after tune_decoder.py).
 
-1. Trip-level bootstrap (10,000 resamples of trips) for pooled final top-1 of the round-1 system and the
+1. Trip-level bootstrap (10,000 resamples of trips) for pooled final top-1 of the archived 28-feature system (archive/round1_28_features) and the
    final system, and for their paired difference, on the 80 training trips (out-of-fold) and on the 10
    student-test trips.
 2. Label-protocol sensitivity on student-test: both systems are re-scored against direction-aware labels
@@ -45,8 +45,9 @@ def boot(ok, n, ok2=None):
 
 
 out = {"bootstrap_resamples": B}
+ARCH = ROOT / "archive" / "round1_28_features"     # earlier 28-feature system, kept only as the reference of the paired comparison
 for part, f1, f2 in [("train_oof", "realign_train_oof.csv", "final_train_oof.csv"), ("student_test", "realign_test.csv", "final_test.csv")]:
-    a = pd.read_csv(RES / f1, dtype={"trip": str}).set_index("trip")
+    a = pd.read_csv(ARCH / "results" / f1, dtype={"trip": str}).set_index("trip")
     b = pd.read_csv(RES / f2, dtype={"trip": str}).set_index("trip").loc[a.index]
     assert (a.n_reliable.to_numpy() == b.n_rel.to_numpy()).all()
     n = a.n_reliable.to_numpy()
@@ -60,7 +61,7 @@ for part, f1, f2 in [("train_oof", "realign_train_oof.csv", "final_train_oof.csv
     print(part, json.dumps(out[part]), flush=True)
 
 # ---- label sensitivity + independent recomputation + leakage check on student-test
-P1 = Predictor(config=ROOT / "configs/round1_config.json")
+P1 = Predictor(model_dir=ARCH / "models", config=ARCH / "configs/round1_config.json")
 P2 = Predictor()
 tmp = Path(tempfile.mkdtemp(prefix="pathsnap_noroute_"))
 tot = {k: 0 for k in ["n_geo", "n_dir", "r1_geo", "r1_dir", "f_geo", "f_dir", "labels_changed"]}

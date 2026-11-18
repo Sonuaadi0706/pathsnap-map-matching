@@ -6,8 +6,15 @@
   },
   "candidates": {
     "radius_m": 80.0,
-    "max_k": 12,
-    "index_sample_step_m": 10.0
+    "max_k": 24,
+    "index_sample_step_m": 10.0,
+    "k_samples": 192
+  },
+  "features": {
+    "count": 46,
+    "base": 28,
+    "context": 18,
+    "defined_in": "pathsnap/candidates.py (FEATURES)"
   },
   "cv": {
     "n_folds": 5,
@@ -17,51 +24,47 @@
     "train_stride": "every 3rd fix (KNN: every 9th)",
     "cv_eval_stride": 3
   },
+  "six_model_benchmark": {
+    "models": [
+      "logreg",
+      "gnb",
+      "knn",
+      "rf",
+      "lgbm",
+      "mlp"
+    ],
+    "objective": "binary (reference arc vs other candidate)",
+    "script": "scripts/train_models.py"
+  },
+  "deployed_scorer": {
+    "model": "lgbm_v2_untuned",
+    "family": "LightGBM",
+    "objective": "lambdarank",
+    "train_stride": 3,
+    "hyperparameters": "configs/start_hyperparameters.json (kept after the Bayesian search tied)"
+  },
   "bayes_opt": {
     "sampler": "Optuna TPE multivariate",
     "n_trials": 40,
-    "timeout_s": 2700,
-    "objective": "mean CV observation top-1",
-    "search_train_stride": 6
+    "objective": "mean 5-fold trip-grouped CV observation top-1",
+    "search_train_stride": 9,
+    "promotion": "top-5 trials re-scored at stride 3",
+    "script": "scripts/bayes_opt_v2.py"
   },
-  "hmm": {
-    "grid_beta": [
-      5,
-      10,
-      20,
-      40,
-      80
-    ],
-    "grid_w_emit": [
-      0.5,
-      1.0,
-      2.0
-    ],
-    "gap_s": 60,
-    "gap_m": 1500,
-    "v_max_ms": 60,
-    "selected_on": "training OOF scores"
-  },
-  "decoder_post_step": {
+  "decoder": {
+    "hmm_params": {
+      "beta": 20.0,
+      "w_emit": 0.25,
+      "back_tol_m": 15.0,
+      "back_pen_m": 60.0,
+      "uturn_pen": 0.0,
+      "gap_s": 60.0,
+      "top_m": 24,
+      "realign_max_m": 80.0,
+      "bridge": true
+    },
     "realign_to_predicted_route": true,
-    "max_dist_m": 80.0,
-    "selected_on": "training OOF scores (results/realign_summary.json)"
-  },
-  "round2": {
-    "candidates": {
-      "radius_m": 80.0,
-      "max_k": 24,
-      "k_samples": 192
-    },
-    "features": 46,
-    "objective": "lambdarank",
-    "train_stride": 3,
-    "bayes_opt": {
-      "sampler": "Optuna TPE multivariate",
-      "n_trials": 40,
-      "search_train_stride": 9,
-      "promotion": "top-5 trials re-scored at stride 3"
-    },
+    "selection": "beta, w from a grid on training out-of-fold scores (archived 28-feature round); re-examined with the deployed scorer under a held-out rule (grid + Bayesian search, not adopted); dropout bridging adopted",
     "decoder_tuning": {
       "sampler": "Optuna TPE",
       "n_trials": 64,
@@ -69,5 +72,6 @@
       "holdout": "fold 4",
       "adopted": false
     }
-  }
+  },
+  "naming": "file names containing 'v2' (lgbm_v2_untuned, optuna_v2_*, tune_v2_variants, decoder_grid_v2) refer to this 46-feature table; the earlier 28-feature round is in archive/round1_28_features/"
 }

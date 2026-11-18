@@ -1,4 +1,4 @@
-"""Bayesian optimisation round 2 (Optuna TPE) for the round-2 scorer: v2 candidates + v2 features,
+"""Bayesian optimisation (Optuna TPE) of the ranking scorer on the 46-feature candidate table,
 objective family chosen in scripts/tune_v2.py. Same 5 trip-grouped folds, training trips only.
 
 A first attempt with n_estimators up to 900 and num_leaves up to 255 on a stride-6 subsample was stopped after

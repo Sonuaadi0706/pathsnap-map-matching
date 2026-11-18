@@ -1,12 +1,15 @@
-"""Model comparison figures + consolidated tables from saved results.
+"""Model comparison figures + consolidated tables from saved results (46-feature candidate table).
 
-outputs: figures/cmp_*.png, figures/hist_*.png, figures/cm_*.png, figures/optuna_*.png,
-         figures/hmm_*.png, results/comparison_table.csv, results/tuned_vs_untuned.csv
+outputs: figures/cmp_*.png, figures/hist_*.png, figures/cm_candidates.png, figures/optuna_*.png,
+         figures/hmm_*.png, figures/feat_importance.png, figures/v2_variants.png, figures/final_ladder.png,
+         results/comparison_table.csv, results/tuned_vs_untuned.csv, results/optuna_importance.csv,
+         results/feature_importance.csv, results/test_pertrip_top1_matrix.csv
 """
 import json
 import sys
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -18,11 +21,13 @@ from pathsnap.models import NAMES  # noqa: E402
 ps.apply()
 plt = ps.plt
 RES, FIG = ROOT / "results", ROOT / "figures"
-ORDER = [m for m in ["logreg", "gnb", "knn", "rf", "lgbm", "mlp", "lgbm_tuned"] if (RES / f"model_{m}.json").exists()]
-BASE = [m for m in ORDER if m != "lgbm_tuned"]
-M = {m: json.load(open(RES / f"model_{m}.json")) for m in ORDER}
-SHORT = {"logreg": "LogReg", "gnb": "GaussNB", "knn": "KNN", "rf": "RandForest", "lgbm": "LightGBM",
-         "mlp": "MLP", "lgbm_tuned": "LightGBM\ntuned"}
+BASE = ["logreg", "gnb", "knn", "rf", "lgbm", "mlp"]                 # the six model families (binary classifiers)
+M = {m: json.load(open(RES / f"model_{m}.json")) for m in BASE}
+CFG = json.load(open(ROOT / "models" / "final_config.json"))
+DEP = CFG["model"]                                                  # deployed ranking scorer
+SHORT = {"logreg": "LogReg", "gnb": "GaussNB", "knn": "KNN", "rf": "RandForest", "lgbm": "LightGBM", "mlp": "MLP",
+         "baseline": "Nearest\nsegment", DEP: "LightGBM\nLambdaRank\n(deployed)"}
+w = 0.38
 
 
 def cfg_str(c):
@@ -32,7 +37,7 @@ def cfg_str(c):
 
 # ---------------- consolidated table ----------------
 rows = []
-for m in ORDER:
+for m in BASE:
     d = M[m]
     cv, sd, te = d["cv_mean"], d["cv_std"], d["student_test"]
     rows.append(dict(model=m, name=NAMES[m], family=d["config"]["family"], config=cfg_str(d["config"]),
@@ -52,7 +57,7 @@ T = pd.DataFrame(rows)
 hab = RES / "hmm_ablation_models.csv"
 if hab.exists():
     H = pd.read_csv(hab)
-    T = T.merge(H[["model", "hmm_top1", "hmm_continuity", "cls_route_f1", "hmm_route_f1"]], on="model", how="left")
+    T = T.merge(H[["model", "hmm_top1", "final_top1", "hmm_continuity", "cls_route_f1", "hmm_route_f1"]], on="model", how="left")
 T.to_csv(RES / "comparison_table.csv", index=False)
 print(T[["model", "cv_macro_f1", "cv_top1", "test_top1", "test_macro_f1", "test_obs_logloss", "test_continuity",
          "infer_time_s"]].round(4).to_string())
@@ -75,7 +80,6 @@ plt.close(fig)
 
 # student-test top-1 and macro F1
 fig, ax = plt.subplots(figsize=(7.5, 3.4))
-w = 0.38
 b1 = ax.bar(x - w / 2, B.test_top1, w, color=ps.INK, label="top-1 accuracy")
 b2 = ax.bar(x + w / 2, B.test_macro_f1, w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="macro-F1")
 ps.label_bars(ax, b1, size=7)
@@ -151,30 +155,31 @@ plt.close(fig)
 piv.to_csv(RES / "test_pertrip_top1_matrix.csv")
 
 # confusion matrices (candidate level, binary, threshold 0.5) on student-test
-fig, axes = plt.subplots(2, 3, figsize=(8.5, 6))
-axes = axes.ravel()
-for ax, m in zip(axes, BASE):
-    s = pd.read_pickle(RES / f"test_scores_{m}.pkl")
-    s = s[s.reliable]
-    yp = (s.p >= 0.5).astype(int)
-    cm = np.array([[((s.y == a) & (yp == b)).sum() for b in (0, 1)] for a in (0, 1)])
-    cmn = cm / cm.sum(1, keepdims=True)
-    ax.imshow(cmn, cmap="Greys", vmin=0, vmax=1)
-    for i in range(2):
-        for j in range(2):
-            ax.text(j, i, f"{cmn[i, j]:.3f}\n({cm[i, j]})", ha="center", va="center", fontsize=9,
-                    color="white" if cmn[i, j] > 0.5 else "black")
-    ax.set_xticks([0, 1], ["other", "ref"], fontsize=7)
-    ax.set_yticks([0, 1], ["other", "ref"], fontsize=7)
-    ax.set_xlabel("predicted", fontsize=7)
-    ax.set_title(SHORT[m].replace("\n", " "), fontsize=9)
-    ax.grid(False)
-axes[0].set_ylabel("true", fontsize=8)
-axes[3].set_ylabel("true", fontsize=8)
-fig.suptitle("Candidate-level confusion matrices (student-test, threshold 0.5, row-normalised)", fontsize=10)
-fig.tight_layout()
-fig.savefig(FIG / "cm_candidates.png")
-plt.close(fig)
+if all((RES / f"test_scores_{m}.pkl").exists() for m in BASE):
+    fig, axes = plt.subplots(2, 3, figsize=(8.5, 6))
+    axes = axes.ravel()
+    for ax, m in zip(axes, BASE):
+        s = pd.read_pickle(RES / f"test_scores_{m}.pkl")
+        s = s[s.reliable]
+        yp = (s.p >= 0.5).astype(int)
+        cm = np.array([[((s.y == a) & (yp == b)).sum() for b in (0, 1)] for a in (0, 1)])
+        cmn = cm / cm.sum(1, keepdims=True)
+        ax.imshow(cmn, cmap="Greys", vmin=0, vmax=1)
+        for i in range(2):
+            for j in range(2):
+                ax.text(j, i, f"{cmn[i, j]:.3f}\n({cm[i, j]})", ha="center", va="center", fontsize=9,
+                        color="white" if cmn[i, j] > 0.5 else "black")
+        ax.set_xticks([0, 1], ["other", "ref"], fontsize=7)
+        ax.set_yticks([0, 1], ["other", "ref"], fontsize=7)
+        ax.set_xlabel("predicted", fontsize=7)
+        ax.set_title(SHORT[m].replace("\n", " "), fontsize=9)
+        ax.grid(False)
+    axes[0].set_ylabel("true", fontsize=8)
+    axes[3].set_ylabel("true", fontsize=8)
+    fig.suptitle("Candidate-level confusion matrices (student-test, threshold 0.5, row-normalised)", fontsize=10)
+    fig.tight_layout()
+    fig.savefig(FIG / "cm_candidates.png")
+    plt.close(fig)
 
 # epoch-wise histories (only models that produce them)
 for m in ["mlp", "lgbm"]:
@@ -196,75 +201,88 @@ for m in ["mlp", "lgbm"]:
     fig.savefig(FIG / f"hist_{m}.png")
     plt.close(fig)
 
-# ---------------- Bayesian optimisation ----------------
-ob = RES / "optuna_best.json"
-if ob.exists():
-    best = json.load(open(ob))
-    tr = pd.read_csv(RES / "optuna_trials.csv")
-    tr = tr[tr.state == "COMPLETE"]
-    fig, ax = plt.subplots(figsize=(7, 3.2))
-    ax.scatter(tr.number, tr.value, s=18, color=ps.MID, label="trial CV top-1")
-    ax.plot(tr.number, tr.value.cummax(), color=ps.INK, label="best so far")
-    ax.axhline(best["untuned_same_protocol"]["cv_top1"], color=ps.INK, ls=":", lw=1.2, label="untuned config")
-    ax.set_xlabel("trial")
-    ax.set_ylabel("CV observation top-1")
-    ax.set_title(f"Optuna TPE search on LightGBM ({len(tr)} trials, 5-fold trip-grouped CV)")
-    ax.legend(loc="lower right")
-    fig.savefig(FIG / "optuna_history.png")
+# ---------------- objective / training-set variants on the 46-feature table ----------------
+V = pd.read_csv(RES / "tune_v2_variants.csv")
+lab = {"A ": "A  28 base\nfeatures\nbinary", "B ": "B  46 features\nbinary", "C1": "C1  46 features\nlambdarank",
+       "C2": "C2  46 features\nrank_xendcg", "D ": "D  lambdarank\nall fixes"}
+fig, ax = plt.subplots(figsize=(8.2, 3.6))
+xx = np.arange(len(V))
+b1 = ax.bar(xx - w / 2, V.cv_top1, w, yerr=V.cv_top1_std, color=ps.INK, capsize=3, error_kw=dict(ecolor=ps.MID, lw=1), label="CV top-1")
+b2 = ax.bar(xx + w / 2, V.cv_macro_f1, w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="CV macro-F1")
+for b_, v_ in zip(b1, V.cv_top1):
+    ax.annotate(f"{v_:.4f}", (b_.get_x() + b_.get_width() / 2, 0.842), ha="center", fontsize=7, color="white", rotation=90, va="bottom")
+ps.label_bars(ax, b2, fmt="{:.3f}", size=7)
+ax.set_xticks(xx, [lab[v[:2]] for v in V.variant], fontsize=7)
+ax.set_ylim(0.84, 0.96)
+ax.set_title("Features and training objective (same 5 trip-grouped folds, 80 training trips)")
+ax.legend(loc="upper left", ncol=2, fontsize=8)
+fig.savefig(FIG / "v2_variants.png")
+plt.close(fig)
+
+# ---------------- Bayesian optimisation of the ranking scorer ----------------
+best = json.load(open(RES / "optuna_v2_best.json"))
+tr = pd.read_csv(RES / "optuna_v2_trials.csv")
+tr = tr[tr.state == "COMPLETE"]
+fig, ax = plt.subplots(figsize=(7, 3.2))
+ax.scatter(tr.number, tr.value, s=18, color=ps.MID, label="trial CV top-1")
+ax.plot(tr.number, tr.value.cummax(), color=ps.INK, label="best so far")
+ax.axhline(best["untuned_same_protocol"]["cv_top1"], color=ps.INK, ls=":", lw=1.2, label="starting configuration")
+ax.set_xlabel("trial")
+ax.set_ylabel("CV observation top-1")
+ax.set_title(f"Optuna TPE search, LightGBM LambdaRank on 46 features ({len(tr)} trials)")
+ax.legend(loc="lower right")
+fig.savefig(FIG / "optuna_history.png")
+plt.close(fig)
+try:
+    import optuna
+    study = joblib.load(RES / "optuna_v2_study.pkl")
+    imp = optuna.importance.get_param_importances(study, evaluator=optuna.importance.FanovaImportanceEvaluator(seed=42))
+    fig, ax = plt.subplots(figsize=(6, 3))
+    k = list(imp.keys())[::-1]
+    ax.barh(k, [imp[i] for i in k], color=ps.INK)
+    ax.set_title("Hyperparameter importance (fANOVA over completed trials)")
+    fig.savefig(FIG / "optuna_importance.png")
     plt.close(fig)
-    try:
-        import optuna
-        import joblib
-        study = joblib.load(RES / "optuna_study.pkl")
-        imp = optuna.importance.get_param_importances(study, evaluator=optuna.importance.FanovaImportanceEvaluator(seed=42))
-        fig, ax = plt.subplots(figsize=(6, 3))
-        k = list(imp.keys())[::-1]
-        ax.barh(k, [imp[i] for i in k], color=ps.INK)
-        ax.set_title("Hyperparameter importance (fANOVA over completed trials)")
-        fig.savefig(FIG / "optuna_importance.png")
-        plt.close(fig)
-        pd.Series(imp).to_csv(RES / "optuna_importance.csv")
-    except Exception as e:  # noqa: BLE001
-        print("importance failed", e)
-    if "lgbm_tuned" in M:
-        rows = []
-        for m in ["lgbm", "lgbm_tuned"]:
-            d = M[m]
-            rows.append(dict(model=m, cv_macro_f1=d["cv_mean"]["obs_macro_f1_trip"], cv_top1=d["cv_mean"]["obs_top1"],
-                             test_top1=d["student_test"]["obs_top1"], test_macro_f1=d["student_test"]["obs_macro_f1_trip"],
-                             test_obs_logloss=d["student_test"]["obs_logloss"],
-                             test_cand_logloss=d["student_test"]["cand_logloss"],
-                             test_continuity=d["student_test"]["route_continuity"],
-                             infer_time_s=d["student_test"]["infer_time_s"], fit_time_s=d["final_fit_time_s"]))
-        TV = pd.DataFrame(rows)
-        TV.to_csv(RES / "tuned_vs_untuned.csv", index=False)
-        print(TV.round(4).to_string())
-        fig, ax = plt.subplots(figsize=(7, 3.2))
-        mets = ["cv_macro_f1", "cv_top1", "test_top1", "test_macro_f1"]
-        xx = np.arange(len(mets))
-        b1 = ax.bar(xx - w / 2, TV.iloc[0][mets].astype(float), w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="untuned")
-        b2 = ax.bar(xx + w / 2, TV.iloc[1][mets].astype(float), w, color=ps.INK, label="Bayesian-tuned")
-        ps.label_bars(ax, b1, fmt="{:.4f}", size=7)
-        ps.label_bars(ax, b2, fmt="{:.4f}", size=7)
-        ax.set_xticks(xx, ["CV macro-F1", "CV top-1", "test top-1", "test macro-F1"])
-        ax.set_ylim(0.8, 0.95)
-        ax.set_title("LightGBM untuned vs tuned (same folds, data and metrics)")
-        ax.legend(loc="upper left", ncol=2)
-        fig.savefig(FIG / "optuna_tuned_vs_untuned.png")
-        plt.close(fig)
+    pd.Series(imp).to_csv(RES / "optuna_importance.csv")
+except Exception as e:  # noqa: BLE001
+    print("importance failed", e)
+rows = []
+for m in [DEP, "lgbm_v2"] if DEP != "lgbm_v2" else ["lgbm_v2_untuned", DEP]:
+    d = json.load(open(RES / f"model_{m}.json"))
+    rows.append(dict(model=m, cv_macro_f1=d["cv_mean"]["obs_macro_f1_trip"], cv_top1=d["cv_mean"]["obs_top1"],
+                     cv_train_top1=d["cv_mean"]["train_obs_top1"],
+                     test_top1=d["student_test"]["obs_top1"], test_macro_f1=d["student_test"]["obs_macro_f1_trip"],
+                     test_obs_logloss=d["student_test"]["obs_logloss"], test_continuity=d["student_test"]["route_continuity"],
+                     infer_time_s=d["student_test"]["infer_time_s"], fit_time_s=d["final_fit_time_s"]))
+TV = pd.DataFrame(rows)
+TV.to_csv(RES / "tuned_vs_untuned.csv", index=False)
+print(TV.round(4).to_string())
+fig, ax = plt.subplots(figsize=(7, 3.2))
+mets = ["cv_macro_f1", "cv_top1", "test_top1", "test_macro_f1"]
+xx = np.arange(len(mets))
+b1 = ax.bar(xx - w / 2, TV.iloc[0][mets].astype(float), w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="starting configuration (untuned)")
+b2 = ax.bar(xx + w / 2, TV.iloc[1][mets].astype(float), w, color=ps.INK, label="Bayesian-tuned")
+ps.label_bars(ax, b1, fmt="{:.4f}", size=7)
+ps.label_bars(ax, b2, fmt="{:.4f}", size=7)
+ax.set_xticks(xx, ["CV macro-F1", "CV top-1", "test top-1", "test macro-F1"])
+ax.set_ylim(0.85, 0.96)
+ax.set_title("LightGBM LambdaRank untuned vs tuned (same folds, data and metrics)")
+ax.legend(loc="upper left", ncol=2, fontsize=8)
+fig.savefig(FIG / "optuna_tuned_vs_untuned.png")
+plt.close(fig)
 
 # ---------------- HMM ----------------
 if hab.exists():
     H = pd.read_csv(hab).set_index("model")
-    HM = [m for m in ORDER if m in H.index]
+    HM = [m for m in ["baseline"] + BASE + [DEP] if m in H.index]
     xx = np.arange(len(HM))
-    fig, axes = plt.subplots(1, 3, figsize=(13, 3.4))
+    fig, axes = plt.subplots(1, 3, figsize=(13.5, 3.6))
     for ax, (a, b, t) in zip(axes, [("cls_top1", "hmm_top1", "observation top-1"),
                                     ("cls_continuity", "hmm_continuity", "route continuity"),
                                     ("cls_route_f1", "hmm_route_f1", "route F1 (length-weighted)")]):
-        b1 = ax.bar(xx - w / 2, H.loc[HM, a], w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="classifier only")
-        b2 = ax.bar(xx + w / 2, H.loc[HM, b], w, color=ps.INK, label="classifier + HMM")
-        ax.set_xticks(xx, [SHORT[m] for m in HM], fontsize=7)
+        b1 = ax.bar(xx - w / 2, H.loc[HM, a], w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="scorer only")
+        b2 = ax.bar(xx + w / 2, H.loc[HM, b], w, color=ps.INK, label="scorer + HMM/Viterbi")
+        ax.set_xticks(xx, [SHORT[m].replace("\n(deployed)", "").replace("\n", " ", 1) if m == DEP else SHORT[m] for m in HM], fontsize=6.5)
         lo = min(H.loc[HM, a].min(), H.loc[HM, b].min())
         ax.set_ylim(max(0, lo - 0.05), 1.0)
         ax.set_title(f"Student-test {t}")
@@ -273,126 +291,82 @@ if hab.exists():
     fig.tight_layout(rect=(0, 0.07, 1, 1))
     fig.savefig(FIG / "hmm_ablation_models.png")
     plt.close(fig)
-    pt = pd.read_csv(RES / "hmm_test_pertrip.csv", dtype={"trip": str})
-    sel = json.load(open(RES / "hmm_summary.json"))["selected_model"]
-    q = pt[pt.model == sel]
-    xt = np.arange(len(q))
-    fig, axes = plt.subplots(1, 2, figsize=(12, 3.4))
-    for ax, (a, b, t) in zip(axes, [("cls_top1", "hmm_top1", "observation top-1"), ("cls_route_f1", "hmm_route_f1", "route F1")]):
-        b1 = ax.bar(xt - w / 2, q[a], w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="classifier only")
-        b2 = ax.bar(xt + w / 2, q[b], w, color=ps.INK, label="classifier + HMM")
-        ax.set_xticks(xt, q.trip, fontsize=7, rotation=30)
-        ax.set_ylim(max(0, min(q[a].min(), q[b].min()) - 0.05), 1.0)
-        ax.set_title(f"Per-trip {t} ({NAMES[sel]}, student-test)")
-    h_, l_ = axes[0].get_legend_handles_labels()
-    fig.legend(h_, l_, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.02))
-    fig.tight_layout(rect=(0, 0.07, 1, 1))
-    fig.savefig(FIG / "hmm_pertrip.png")
-    plt.close(fig)
-    G = pd.read_csv(RES / "hmm_grid.csv")
-    pv = G.pivot(index="w_emit", columns="beta", values="hmm_top1")
-    fig, ax = plt.subplots(figsize=(5.5, 2.8))
-    ax.imshow(pv.values, cmap="Greys", aspect="auto", vmin=pv.values.min() - 0.01, vmax=pv.values.max())
-    for i in range(pv.shape[0]):
-        for j in range(pv.shape[1]):
-            ax.text(j, i, f"{pv.values[i, j]:.4f}", ha="center", va="center", fontsize=8,
-                    color="white" if pv.values[i, j] > pv.values.mean() else "black")
-    ax.set_xticks(range(pv.shape[1]), [f"β={b:g}" for b in pv.columns])
-    ax.set_yticks(range(pv.shape[0]), [f"w={x:g}" for x in pv.index])
-    ax.grid(False)
-    ax.set_title("Decoder grid: OOF top-1 on 80 training trips")
-    fig.savefig(FIG / "hmm_grid.png")
-    plt.close(fig)
+
+q = pd.read_csv(RES / "final_test.csv", dtype={"trip": str})
+xt = np.arange(len(q))
+fig, ax = plt.subplots(figsize=(10, 3.5))
+w3 = 0.27
+b1 = ax.bar(xt - w3, q.cls_top1, w3, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="scorer only")
+b2 = ax.bar(xt, q.hmm_top1, w3, color=ps.MID, label="+ HMM/Viterbi")
+b3 = ax.bar(xt + w3, q.final_top1, w3, color=ps.INK, label="+ re-alignment (deployed)")
+ax.set_xticks(xt, q.trip, fontsize=7, rotation=30)
+ax.set_ylim(max(0, q.cls_top1.min() - 0.05), 1.005)
+ax.set_ylabel("observation top-1")
+ax.set_title("Per-trip effect of the decoder, deployed scorer (student-test)")
+ax.legend(loc="lower center", ncol=3, bbox_to_anchor=(0.5, -0.36), fontsize=8)
+fig.savefig(FIG / "hmm_pertrip.png")
+plt.close(fig)
+
+G = pd.read_csv(RES / "decoder_grid_v2.csv")
+pv = G.pivot(index="w_emit", columns="beta", values="tune_trip_mean_top1")
+fig, ax = plt.subplots(figsize=(5.5, 2.8))
+ax.imshow(pv.values, cmap="Greys", aspect="auto", vmin=pv.values.min() - 0.002, vmax=pv.values.max())
+for i in range(pv.shape[0]):
+    for j in range(pv.shape[1]):
+        ax.text(j, i, f"{pv.values[i, j]:.4f}", ha="center", va="center", fontsize=8,
+                color="white" if pv.values[i, j] > pv.values.mean() else "black")
+ax.set_xticks(range(pv.shape[1]), [f"β={b:g}" for b in pv.columns])
+ax.set_yticks(range(pv.shape[0]), [f"w={x:g}" for x in pv.index])
+ax.grid(False)
+ax.set_title("Decoder grid: mean per-trip final top-1, 64 tuning trips")
+fig.savefig(FIG / "hmm_grid.png")
+plt.close(fig)
+
+dt_ = pd.read_csv(RES / "decoder_trials.csv")
+dt_ = dt_[dt_.state == "COMPLETE"]
+db = json.load(open(RES / "decoder_best.json"))
+fig, ax = plt.subplots(figsize=(7, 3.2))
+ax.scatter(dt_.number, dt_.value, s=18, color=ps.MID, label="trial: mean per-trip final top-1")
+ax.plot(dt_.number, dt_.value.cummax(), color=ps.INK, label="best so far")
+ax.axhline(db["round1_tuning_trip_mean_top1"], color=ps.INK, ls=":", lw=1.2, label="deployed decoder setting")
+ax.set_ylim(max(dt_.value.min(), db["round1_tuning_trip_mean_top1"] - 0.02), dt_.value.max() + 0.002)
+ax.set_xlabel("trial")
+ax.set_ylabel("mean per-trip final top-1, 64 tuning trips")
+ax.set_title(f"Bayesian decoder tuning (Optuna TPE, {len(dt_)} trials)")
+ax.legend(loc="lower right")
+fig.savefig(FIG / "decoder_tuning_history.png")
+plt.close(fig)
+
+# ---------------- feature importance (gain) of the deployed scorer ----------------
+sc = joblib.load(ROOT / "models" / f"{DEP}.joblib")
+gain = sc.model.booster_.feature_importance("gain")
+s = pd.Series(gain / gain.sum(), index=sc.feats).sort_values()
+s.to_csv(RES / "feature_importance.csv")
+fig, ax = plt.subplots(figsize=(6.2, 8.6))
+ax.barh(s.index, s.values, color=ps.INK)
+ax.set_xlabel("share of total split gain")
+ax.set_title(f"Deployed scorer (LightGBM LambdaRank): feature importance (gain), {len(s)} features")
+ax.tick_params(axis="y", labelsize=7.5)
+fig.savefig(FIG / "feat_importance.png")
+plt.close(fig)
+
+# ---------------- accuracy ladder of the deployed system ----------------
+fs = json.load(open(RES / "final_summary.json"))
+base = json.load(open(RES / "baseline_nearest.json"))
+stages = ["nearest\nsegment", "scorer\n(46 features, LambdaRank)", "+ HMM/Viterbi", "+ re-alignment\n(deployed)"]
+te = [base["student_test"]["obs_top1"]] + [fs["student_test"]["final_decoder"][k]["top1"] for k in ("cls", "hmm", "final")]
+trn = [base["cv_mean"]["obs_top1"]] + [fs["train"]["final_decoder"][k]["top1"] for k in ("cls", "hmm", "final")]
+fig, ax = plt.subplots(figsize=(7.6, 3.6))
+xx = np.arange(len(stages))
+b1 = ax.bar(xx - w / 2, trn, w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="80 training trips (CV / out-of-fold)")
+b2 = ax.bar(xx + w / 2, te, w, color=ps.INK, label="10 student-test trips")
+ps.label_bars(ax, b1, size=7)
+ps.label_bars(ax, b2, size=7)
+ax.set_xticks(xx, stages, fontsize=8)
+ax.set_ylim(0.5, 1.03)
+ax.set_ylabel("observation top-1")
+ax.set_title("Accuracy ladder: every stage on the same trips and labels")
+ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=2, fontsize=8)
+fig.savefig(FIG / "final_ladder.png")
+plt.close(fig)
 print("figures written")
-
-# ---------------- feature importance (gain) of the LightGBM models ----------------
-import joblib  # noqa: E402
-from pathsnap.candidates import FEATURES  # noqa: E402
-
-for m in ["lgbm", "lgbm_tuned"]:
-    f = ROOT / "models" / f"{m}.joblib"
-    if not f.exists():
-        continue
-    mdl = joblib.load(f)
-    gain = mdl.m.booster_.feature_importance("gain")
-    s = pd.Series(gain / gain.sum(), index=FEATURES).sort_values()
-    s.to_csv(RES / f"feature_importance_{m}.csv")
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.barh(s.index, s.values, color=ps.INK)
-    ax.set_xlabel("share of total split gain")
-    ax.set_title(f"{NAMES[m]}: feature importance (gain)")
-    ax.tick_params(axis="y", labelsize=8)
-    fig.savefig(FIG / f"feat_importance_{m}.png")
-    plt.close(fig)
-print("feature importance written")
-
-# ---------------- round 2: variant ladder, second Bayesian search, decoder tuning, final ladder ----------------
-if (RES / "final_summary.json").exists():
-    V = pd.read_csv(RES / "tune_v2_variants.csv")
-    lab = ["A0  v1 cand.\nv1 feat.\nbinary", "A1  K=24\nv1 feat.\nbinary", "B  K=24\nv2 feat.\nbinary", "C1  v2 feat.\nlambdarank",
-           "C2  v2 feat.\nrank_xendcg", "D  lambdarank\nall fixes"]
-    fig, ax = plt.subplots(figsize=(8.6, 3.6))
-    xx = np.arange(len(V))
-    b1 = ax.bar(xx - w / 2, V.cv_top1, w, yerr=V.cv_top1_std, color=ps.INK, capsize=3, error_kw=dict(ecolor=ps.MID, lw=1), label="CV top-1")
-    b2 = ax.bar(xx + w / 2, V.cv_macro_f1, w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="CV macro-F1")
-    for b_, v_ in zip(b1, V.cv_top1):
-        ax.annotate(f"{v_:.4f}", (b_.get_x() + b_.get_width() / 2, 0.842), ha="center", fontsize=7, color="white", rotation=90, va="bottom")
-    ps.label_bars(ax, b2, fmt="{:.3f}", size=7)
-    ax.set_xticks(xx, lab[:len(V)], fontsize=7)
-    ax.set_ylim(0.84, 0.96)
-    ax.set_title("Round 2: candidate set, features and objective (same 5 trip-grouped folds, 80 training trips)")
-    ax.legend(loc="upper left", ncol=2, fontsize=8)
-    fig.savefig(FIG / "v2_variants.png")
-    plt.close(fig)
-
-    o2 = json.load(open(RES / "optuna_v2_best.json"))
-    t2 = pd.read_csv(RES / "optuna_v2_trials.csv")
-    t2 = t2[t2.state == "COMPLETE"]
-    fig, ax = plt.subplots(figsize=(7, 3.2))
-    ax.scatter(t2.number, t2.value, s=18, color=ps.MID, label="trial CV top-1")
-    ax.plot(t2.number, t2.value.cummax(), color=ps.INK, label="best so far")
-    ax.axhline(o2["untuned_same_protocol"]["cv_top1"], color=ps.INK, ls=":", lw=1.2, label="untuned config")
-    ax.set_xlabel("trial")
-    ax.set_ylabel("CV observation top-1")
-    ax.set_title(f"Round-2 Optuna TPE search, LambdaRank + v2 features ({len(t2)} trials)")
-    ax.legend(loc="lower right")
-    fig.savefig(FIG / "optuna_v2_history.png")
-    plt.close(fig)
-
-    dt_ = pd.read_csv(RES / "decoder_trials.csv")
-    dt_ = dt_[dt_.state == "COMPLETE"]
-    db = json.load(open(RES / "decoder_best.json"))
-    fig, ax = plt.subplots(figsize=(7, 3.2))
-    ax.scatter(dt_.number, dt_.value, s=18, color=ps.MID, label="trial: mean per-trip final top-1")
-    ax.plot(dt_.number, dt_.value.cummax(), color=ps.INK, label="best so far")
-    ax.axhline(db["round1_tuning_trip_mean_top1"], color=ps.INK, ls=":", lw=1.2, label="round-1 decoder setting")
-    ax.set_ylim(max(dt_.value.min(), db["round1_tuning_trip_mean_top1"] - 0.02), dt_.value.max() + 0.002)
-    ax.set_xlabel("trial")
-    ax.set_ylabel("mean per-trip final top-1, 64 tuning trips")
-    ax.set_title(f"Bayesian decoder tuning (Optuna TPE, {len(dt_)} trials)")
-    ax.legend(loc="lower right")
-    fig.savefig(FIG / "decoder_tuning_history.png")
-    plt.close(fig)
-
-    fs = json.load(open(RES / "final_summary.json"))
-    r1 = json.load(open(RES / "realign_summary.json"))
-    base = json.load(open(RES / "baseline_nearest.json"))
-    stages = ["nearest\nsegment", "R1 scorer\n(v1 feat.)", "R1 + HMM", "R1 final\n(+ re-align)", "R2 scorer\n(v2 feat., rank)", "R2 + HMM", "R2 final"]
-    te = [base["student_test"]["obs_top1"], r1["student_test"]["cls"]["top1"], r1["student_test"]["hmm"]["top1"], r1["student_test"]["realign"]["top1"],
-          fs["student_test"]["final_decoder"]["cls"]["top1"], fs["student_test"]["final_decoder"]["hmm"]["top1"], fs["student_test"]["final_decoder"]["final"]["top1"]]
-    trn = [base["cv_mean"]["obs_top1"], r1["train"]["cls"]["top1"], r1["train"]["hmm"]["top1"], r1["train"]["realign"]["top1"],
-           fs["train"]["final_decoder"]["cls"]["top1"], fs["train"]["final_decoder"]["hmm"]["top1"], fs["train"]["final_decoder"]["final"]["top1"]]
-    fig, ax = plt.subplots(figsize=(9, 3.6))
-    xx = np.arange(len(stages))
-    b1 = ax.bar(xx - w / 2, trn, w, color=ps.LIGHT, edgecolor=ps.MID, hatch="///", label="80 training trips (CV / out-of-fold)")
-    b2 = ax.bar(xx + w / 2, te, w, color=ps.INK, label="10 student-test trips")
-    ps.label_bars(ax, b1, size=7)
-    ps.label_bars(ax, b2, size=7)
-    ax.set_xticks(xx, stages, fontsize=8)
-    ax.set_ylim(0.5, 1.03)
-    ax.set_ylabel("observation top-1")
-    ax.set_title("Accuracy ladder: every stage on the same trips and labels")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2, fontsize=8)
-    fig.savefig(FIG / "final_ladder.png")
-    plt.close(fig)
-    print("round-2 figures written")

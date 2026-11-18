@@ -3,7 +3,7 @@
 For each of the 5 trip-grouped folds (results/folds.json) the validation fold (16 trips) is fixed and the
 model is trained on nested random subsets of the other 64 trips (4, 8, 16, 32, 48, 64 trips). Reported per
 size: in-sample top-1 on the trips used for training and top-1 on the validation fold (every 3rd fix, as in
-all CV tables), mean and std over the 5 folds. Two models on the round-2 table (46 features, K=24):
+all CV tables), mean and std over the 5 folds. Two models on the candidate table (46 features, K=24):
   * logreg  : logistic regression (configuration of Section 3)       -> high-bias reference
   * lgbm_v2 : LightGBM LambdaRank with the deployed configuration    -> deployed scorer
 Student-test is not used.

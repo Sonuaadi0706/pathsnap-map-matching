@@ -12,7 +12,7 @@
   "partition": "smoke_partition"
  },
  "00000009": {
-  "seconds": 0.54,
+  "seconds": 0.66,
   "n_observations": 1049,
   "n_matched": 1049,
   "route_arcs": 435,
@@ -27,7 +27,7 @@
   "acc_cls": 0.9056244041944709
  },
  "00000077": {
-  "seconds": 1.15,
+  "seconds": 1.43,
   "n_observations": 3911,
   "n_matched": 3911,
   "route_arcs": 312,
@@ -42,7 +42,7 @@
   "acc_cls": 0.8504218869854258
  },
  "99999999": {
-  "seconds": 0.08,
+  "seconds": 0.11,
   "n_observations": 262,
   "n_matched": 162,
   "route_arcs": 71,
@@ -57,17 +57,17 @@
   "acc_cls": 0.957983193277311
  },
  "server_log_tail": [
-  "2026-11-18 13:25:30,997 | INFO | POST /predict from 127.0.0.1 -> 200 in 1145 ms",
-  "INFO:     127.0.0.1:53115 - \"POST /predict HTTP/1.1\" 200 OK",
-  "2026-11-18 13:25:31,002 | INFO | PREDICT request trip=99999999",
-  "2026-11-18 13:25:31,074 | INFO | PREDICT done trip=99999999 obs=262 route_arcs=71 acc_final=0.9748 acc_hmm=0.9748 acc_cls=0.9580 total=0.06s",
-  "2026-11-18 13:25:31,075 | INFO | POST /predict from 127.0.0.1 -> 200 in 74 ms",
-  "INFO:     127.0.0.1:53120 - \"POST /predict HTTP/1.1\" 200 OK",
-  "2026-11-18 13:25:31,078 | INFO | POST /predict from 127.0.0.1 -> 404 in 1 ms",
-  "INFO:     127.0.0.1:53121 - \"POST /predict HTTP/1.1\" 404 Not Found",
+  "2026-11-18 18:11:46,112 | INFO | POST /predict from 127.0.0.1 -> 200 in 1430 ms",
+  "INFO:     127.0.0.1:57403 - \"POST /predict HTTP/1.1\" 200 OK",
+  "2026-11-18 18:11:46,119 | INFO | PREDICT request trip=99999999",
+  "2026-11-18 18:11:46,219 | INFO | PREDICT done trip=99999999 obs=262 route_arcs=71 acc_final=0.9748 acc_hmm=0.9748 acc_cls=0.9580 total=0.09s",
+  "2026-11-18 18:11:46,224 | INFO | POST /predict from 127.0.0.1 -> 200 in 106 ms",
+  "INFO:     127.0.0.1:57405 - \"POST /predict HTTP/1.1\" 200 OK",
+  "2026-11-18 18:11:46,228 | INFO | POST /predict from 127.0.0.1 -> 404 in 1 ms",
+  "INFO:     127.0.0.1:57406 - \"POST /predict HTTP/1.1\" 404 Not Found",
   "INFO:     Shutting down",
   "INFO:     Waiting for application shutdown.",
   "INFO:     Application shutdown complete.",
-  "INFO:     Finished server process [1012]"
+  "INFO:     Finished server process [93538]"
  ]
 }

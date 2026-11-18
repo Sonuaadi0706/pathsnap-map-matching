@@ -16,8 +16,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from pathsnap.candidates import FEATURES, FEATURES_V2  # noqa: E402
-from pathsnap.dataset import CACHE, CACHE_V2, load_partition  # noqa: E402
+from pathsnap.candidates import BASE_FEATURES, FEATURES  # noqa: E402
+from pathsnap.dataset import load_partition  # noqa: E402
 from pathsnap.metrics import normalise_scores, observation_metrics, top1  # noqa: E402
 from pathsnap.models import SEED, get_config  # noqa: E402
 
@@ -80,21 +80,19 @@ def cv(name, cache, feats, objective="binary", stride=3, params=None, keep_oof=F
 
 folds = json.load(open(RES / "folds.json"))
 DATA = {}
-for key, cache in [("v1", CACHE), ("v2", CACHE_V2)]:
-    c, o = load_partition("train", cache=cache)
-    c["fold"] = c.trip.map(folds)
-    o["fold"] = o.trip.map(folds)
-    DATA[key] = (c, o)
+c, o = load_partition("train")
+c["fold"] = c.trip.map(folds)
+o["fold"] = o.trip.map(folds)
+DATA["v2"] = (c, o)          # the 46-feature candidate table (key name kept for the scripts that import this module)
 
 if __name__ == "__main__":
     R = [
-        cv("A0 reference: v1 candidates, v1 features, binary", "v1", FEATURES),
-        cv("A1 v2 candidates (K=24), v1 features, binary", "v2", FEATURES),
-        cv("B  v2 candidates, v2 features, binary", "v2", FEATURES_V2),
-        cv("C1 v2 features, lambdarank", "v2", FEATURES_V2, "lambdarank"),
-        cv("C2 v2 features, rank_xendcg (listwise softmax)", "v2", FEATURES_V2, "rank_xendcg"),
+        cv("A  28 base features only, binary", "v2", BASE_FEATURES),
+        cv("B  all 46 features, binary", "v2", FEATURES),
+        cv("C1 46 features, lambdarank", "v2", FEATURES, "lambdarank"),
+        cv("C2 46 features, rank_xendcg (listwise softmax)", "v2", FEATURES, "rank_xendcg"),
     ]
-    best = max(R[2:], key=lambda r: r["cv_top1"])
-    R.append(cv(f"D  {best['objective']}, v2 features, all fixes (stride 1)", "v2", FEATURES_V2, best["objective"], stride=1))
+    best = max(R[1:], key=lambda r: r["cv_top1"])
+    R.append(cv(f"D  {best['objective']}, 46 features, all fixes (stride 1)", "v2", FEATURES, best["objective"], stride=1))
     pd.DataFrame(R).to_csv(RES / "tune_v2_variants.csv", index=False)
     print(pd.DataFrame(R)[["variant", "cv_top1", "cv_top1_std", "cv_macro_f1", "cv_obs_logloss", "cv_miss_rate", "wall_s"]].round(4).to_string())

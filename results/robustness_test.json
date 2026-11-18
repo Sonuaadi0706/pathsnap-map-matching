@@ -8,7 +8,7 @@
   "reason": null,
   "top1_final": 1.0,
   "continuity_final": null,
-  "seconds": 0.022
+  "seconds": 0.025
  },
  "e02_two_fixes": {
   "ok": true,
@@ -19,7 +19,7 @@
   "reason": null,
   "top1_final": 1.0,
   "continuity_final": 1.0,
-  "seconds": 0.017
+  "seconds": 0.02
  },
  "e03_three_fixes": {
   "ok": true,
@@ -30,7 +30,7 @@
   "reason": null,
   "top1_final": 1.0,
   "continuity_final": 1.0,
-  "seconds": 0.017
+  "seconds": 0.02
  },
  "e04_no_candidates": {
   "ok": true,
@@ -41,7 +41,7 @@
   "reason": "no GPS observation lies within 60 m of the reference route",
   "top1_final": null,
   "continuity_final": null,
-  "seconds": 0.008
+  "seconds": 0.011
  },
  "e05_huge_time_gap": {
   "ok": true,
@@ -52,7 +52,7 @@
   "reason": null,
   "top1_final": 1.0,
   "continuity_final": 0.9616858237547893,
-  "seconds": 0.093
+  "seconds": 0.111
  },
  "e06_stationary": {
   "ok": true,
@@ -63,7 +63,7 @@
   "reason": null,
   "top1_final": 1.0,
   "continuity_final": 0.9707112970711297,
-  "seconds": 0.073
+  "seconds": 0.095
  },
  "e07_heavy_noise": {
   "ok": true,
@@ -74,7 +74,7 @@
   "reason": null,
   "top1_final": 0.9881422924901185,
   "continuity_final": 0.9272030651340997,
-  "seconds": 0.096
+  "seconds": 0.114
  },
  "e08_coarse_15s": {
   "ok": true,
@@ -85,7 +85,7 @@
   "reason": null,
   "top1_final": 1.0,
   "continuity_final": 0.11764705882352941,
-  "seconds": 0.038
+  "seconds": 0.043
  },
  "e09_reversed": {
   "ok": true,
@@ -96,7 +96,7 @@
   "reason": null,
   "top1_final": 0.0,
   "continuity_final": 0.9808429118773946,
-  "seconds": 0.091
+  "seconds": 0.115
  },
  "e10_unsorted_time": {
   "ok": true,
@@ -107,7 +107,7 @@
   "reason": null,
   "top1_final": 1.0,
   "continuity_final": 0.9578544061302682,
-  "seconds": 0.092
+  "seconds": 0.11
  },
  "e11_duplicate_time": {
   "ok": true,
@@ -118,7 +118,7 @@
   "reason": null,
   "top1_final": 1.0,
   "continuity_final": 0.9616858237547893,
-  "seconds": 0.092
+  "seconds": 0.117
  },
  "e12_no_route_file": {
   "ok": true,
@@ -129,7 +129,7 @@
   "reason": "no private reference route on server for this trip",
   "top1_final": null,
   "continuity_final": null,
-  "seconds": 0.085
+  "seconds": 0.11
  },
  "e13_integer_format": {
   "ok": true,
@@ -140,7 +140,7 @@
   "reason": null,
   "top1_final": 1.0,
   "continuity_final": 0.9616858237547893,
-  "seconds": 0.094
+  "seconds": 0.113
  },
  "e14_empty_route": {
   "ok": true,
@@ -151,7 +151,7 @@
   "reason": "no private reference route on server for this trip",
   "top1_final": null,
   "continuity_final": null,
-  "seconds": 0.085
+  "seconds": 0.104
  },
  "e15_empty_track": {
   "ok": true,
@@ -173,7 +173,7 @@
   "reason": "reference route contains arc ids outside this trip's road network",
   "top1_final": null,
   "continuity_final": null,
-  "seconds": 0.086
+  "seconds": 0.1
  },
  "all_ok": true
 }

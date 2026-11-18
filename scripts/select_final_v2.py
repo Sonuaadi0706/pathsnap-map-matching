@@ -1,4 +1,4 @@
-"""Pre-declared selection rule between the untuned and the Bayesian-tuned round-2 scorer:
+"""Pre-declared selection rule between the untuned and the Bayesian-tuned ranking scorer:
 higher 5-fold trip-grouped CV top-1 under the standard protocol wins; if the difference is below
 0.001 (far inside fold noise) the configuration with the smaller train-vs-validation gap is taken.
 Student-test numbers are NOT used. output: results/final_choice.json

@@ -4,7 +4,7 @@ Design (second version; the first, pooled-objective run is kept in results/*_poo
   * objective  : mean PER-TRIP final top-1 (Viterbi + route re-alignment) -- the evaluator scores one trip
                  at a time, and a pooled objective is dominated by a few very long trips;
   * tuning set : the 64 training trips of CV folds 0-3; the 16 trips of fold 4 are held out;
-  * adoption   : the tuned setting replaces the round-1 setting only if, on the HELD-OUT training trips,
+  * adoption   : the tuned setting replaces the current setting only if, on the HELD-OUT training trips,
                  it improves mean per-trip top-1 and does not lower mean per-trip macro-F1.
 Student-test is evaluated once at the end and is not part of the rule.
 
@@ -38,7 +38,7 @@ RES = ROOT / "results"
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "lgbm_v2"
 N_TRIALS = int(sys.argv[2]) if len(sys.argv) > 2 else 64
 BATCH = 8
-PREP = ROOT / "cache_v2" / "prep"
+PREP = ROOT / "cache" / "prep"
 PREP.mkdir(parents=True, exist_ok=True)
 TOP_M = [6, 8, 12, 24]
 
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     TUNE = {t for t in tr_groups if folds[t] != 4}
     HOLD = {t for t in tr_groups if folds[t] == 4}
     default = dict(beta=20.0, w_emit=0.25, back_tol_m=15.0, back_pen_m=60.0, uturn_pen=0.0, gap_s=60.0, top_m=24,
-                   realign_max_m=80.0)   # the round-1 decoder setting
+                   realign_max_m=80.0)   # the current decoder setting
     sampler = optuna.samplers.TPESampler(seed=42, n_startup_trials=16, multivariate=True)
     study = optuna.create_study(direction="maximize", sampler=sampler, study_name="pathsnap_decoder_tpe")
     study.enqueue_trial(default)
@@ -150,7 +150,7 @@ if __name__ == "__main__":
     study.trials_dataframe().to_csv(RES / "decoder_trials.csv", index=False)
     best = dict(study.best_params)
 
-    # ---- round-1 setting vs tuned: tuning trips, held-out training trips, all 80, student-test ----
+    # ---- current setting vs tuned: tuning trips, held-out training trips, all 80, student-test ----
     te = pd.read_pickle(RES / f"test_scores_{MODEL}.pkl")
     te_groups = {t: g for t, g in te.groupby("trip")}
     out = {"model": MODEL, "decoder_tuned": best, "decoder_round1": default}

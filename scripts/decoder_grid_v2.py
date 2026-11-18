@@ -1,5 +1,5 @@
-"""Low-dimensional decoder check for the round-2 scorer: 4 x 4 grid over (beta, w_emit) with all other
-decoder parameters at the round-1 setting. Same design as tune_decoder.py: selection by mean per-trip final
+"""Low-dimensional decoder check for the deployed ranking scorer: 4 x 4 grid over (beta, w_emit) with all other
+decoder parameters at the current setting. Same design as tune_decoder.py: selection by mean per-trip final
 top-1 on the 64 tuning trips (folds 0-3), adoption only if the 16 held-out training trips (fold 4) improve in
 mean per-trip top-1 without losing macro-F1. Updates results/final_summary.json with the outcome.
 

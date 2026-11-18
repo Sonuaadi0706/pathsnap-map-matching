@@ -11,4 +11,4 @@ self-loop arcs,22.0,2.0
 zero-length arcs,100.0,6.0
 route arcs head->tail continuous,0.9993,0.9997
 observations flagged off-route (>60 m),22337.0,25.0
-candidate miss rate (reliable obs),0.0088,0.0007
+candidate miss rate (reliable obs),0.0046,0.0

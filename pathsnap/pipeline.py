@@ -9,7 +9,7 @@ from pathlib import Path
 import joblib
 import numpy as np
 
-from .candidates import V2, build_candidates
+from .candidates import BASE_FEATURES, V2, build_candidates
 from .data import load_trip
 from .dataset import X_of
 from .hmm import HMMParams, decode, realign_to_route, reconstruct_route
@@ -31,10 +31,10 @@ class Predictor:
         cands = cands.copy()
         if not len(cands):
             cands["p"], cands["pn"] = [], []
-        elif hasattr(self.model, "score_candidates"):      # round-2 scorer (feature list + normalisation inside)
+        elif hasattr(self.model, "score_candidates"):      # ranking scorer (feature list + normalisation inside)
             cands["p"], cands["pn"] = self.model.score_candidates(cands)
         else:
-            cands["p"] = self.model.predict_proba(X_of(cands))[:, 1]
+            cands["p"] = self.model.predict_proba(X_of(cands, None if self.v2 else BASE_FEATURES))[:, 1]
             cands["pn"] = normalise_scores(cands)
         return cands
 
@@ -49,7 +49,7 @@ class Predictor:
             timings["total_s"] = timings["load_s"]
             return dict(trip=trip, cands=None, cls_pred=empty, hmm_pred=empty, final_pred=empty, segments=empty,
                         route=empty, graph=None, fill_failures=0, timings=timings)
-        cands = build_candidates(trip, v2=True, **V2) if self.v2 else build_candidates(trip)
+        cands = build_candidates(trip, v2=True, **V2) if self.v2 else build_candidates(trip, max_k=12, k_samples=96, v2=False)   # else: archived 28-feature models
         timings["candidates_features_s"] = time.time() - t0
         t0 = time.time()
         cands = self.score(cands)

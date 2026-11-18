@@ -1,52 +1,73 @@
 # PathSnap — Map-Matching & Route Reconstruction
 
 Noisy GPS trajectories → road-arc sequence. A learned candidate scorer (six
-models compared, LightGBM selected, Bayesian-tuned and then refined with more
-features and a ranking objective) feeds an HMM/Viterbi decoder over the
-directed road graph. A FastAPI backend (laptop 1) serves
-predictions and computes accuracy against its private reference routes; a
-static evaluator UI (laptop 2) lists the evaluation trips, sends the selected
-trip ID and shows the predicted route and scores.
+model families compared on one 46-feature candidate table, LightGBM selected,
+trained with a ranking objective and checked with a Bayesian hyperparameter
+search) feeds an HMM/Viterbi decoder over the directed road graph. A FastAPI
+backend (laptop 1) serves predictions and computes accuracy against its
+private reference routes; a static evaluator UI (laptop 2) lists the
+evaluation trips, sends the selected trip ID and shows the predicted route and
+scores.
+
+Everything in this repository uses **one candidate table: arcs within 80 m, up
+to 24 per GPS fix, 46 features** (`pathsnap/candidates.py`, `FEATURES`). An
+earlier 28-feature round is kept, unchanged, in `archive/round1_28_features/`
+(see its README and Section 4.3 of the report).
 
 ## Headline results
 
 | Stage | Train (CV / out-of-fold) top-1 | Student-test top-1 | Student-test macro-F1 | Continuity |
 |---|---|---|---|---|
-| Nearest-segment baseline | 0.553 | 0.545 | 0.366 | 0.805 |
-| Round 1 scorer (LightGBM binary, 28 features) | 0.903 | 0.911 | 0.863 | 0.952 |
-| Round 1 final (+ HMM/Viterbi + re-alignment) | 0.957 | 0.975 | 0.970 | 0.979 |
-| Round 2 scorer (LightGBM LambdaRank, 46 features, K=24) | 0.918 | 0.932 | 0.908 | 0.960 |
+| Nearest-segment baseline | 0.556 | 0.548 | 0.371 | 0.807 |
+| Best of six binary models (LightGBM, 46 features) | 0.916 | 0.931 | 0.899 | 0.960 |
+| Deployed scorer (LightGBM LambdaRank, 46 features) | 0.918 | 0.932 | 0.908 | 0.960 |
 | + HMM/Viterbi (dropout bridging) | 0.942 | 0.961 | 0.956 | 0.980 |
 | **+ re-alignment to the predicted route (deployed)** | **0.965** | **0.981** | **0.981** | **0.980** |
 
 * Length-weighted route F1 of the deployed system: 0.993 (student-test), 0.981 (training out-of-fold).
-* Trip-bootstrap 95% interval for the deployed top-1: [0.967, 0.992] on student-test;
-  round 2 minus round 1: +0.0061 [+0.0030, +0.0083] on student-test and
-  +0.0079 [+0.0031, +0.0147] on the 80 training trips.
-* All six families re-trained on the round-2 table (`results/model_*_v2feat.json`): LightGBM remains the best binary model; the
-  deployed LambdaRank scorer is above all of them; Naive Bayes and KNN get worse with the extra features.
-* What did **not** help (kept on record): a second Bayesian search over LightGBM hyperparameters tied the existing ones; two
-  Bayesian searches over eight decoder parameters improved their tuning trips but not held-out training trips and were not adopted.
+* Trip-bootstrap 95% interval for the deployed top-1: [0.967, 0.992] on student-test.
+* **Final evaluation:** the ten reserved evaluator trips, served from a second laptop after the system was frozen,
+  reach a final top-1 between 0.953 and 1.000 per trip (mean 0.987); see Section 7.1 of the report,
+  `logs/api_requests_evaluator.log` and `figures/ui_evaluator_*.jpg`.
+* Six model families on the same table (`results/model_*.json`): LightGBM is best on CV macro-F1, test top-1 and
+  log loss; the deployed LambdaRank scorer is above all six binary models in cross-validation.
+* What did **not** help (kept on record): the Bayesian search over the ranker's hyperparameters tied the starting
+  configuration; two Bayesian searches over eight decoder parameters improved their tuning trips but not held-out
+  training trips and were not adopted.
 * Labels are derived by aligning fixes to the supplied route and carry some noise (1.6% of moving fixes are
   labelled against the direction of travel); under direction-aware labels the deployed top-1 is 0.965.
 
-Sources: `results/final_summary.json`, `results/realign_summary.json`, `results/validation_final.json`, `results/baseline_nearest.json`.
+Sources: `results/final_summary.json`, `results/validation_final.json`, `results/baseline_nearest.json`, `results/model_*.json`.
 Full analysis: `report/PathSnap_Technical_Report.pdf`.
 
 ## Repository layout
 
 | Folder | Contents |
 |---|---|
-| `pathsnap/` | library: `data.py` (I/O, projection), `labels.py` (route→observation alignment, evaluation only), `candidates.py` (candidate generation; 28 round-1 features + 18 round-2 features), `dataset.py`, `models.py` (6 model definitions), `metrics.py`, `hmm.py` (HMM/Viterbi + route filling), `pipeline.py` (route-free inference), `plotstyle.py` |
-| `scripts/` | `eda.py`, `eda_plots.py`, `build_dataset.py`, `baseline.py`, `train_models.py`, `bayes_opt.py`, `hmm_eval.py`, `realign_eval.py`, `error_analysis.py`, `tune_v2.py`, `bayes_opt_v2.py`, `promote_v2.py`, `train_final_v2.py`, `select_final_v2.py`, `tune_decoder.py`, `decoder_grid_v2.py`, `bridge_eval.py`, `finalize_config.py`, `validate_final.py`, `model_plots.py`, `make_maps.py`, `smoke_test.py`, `robustness_test.py`, `preflight.py`, `build_report.py` |
+| `pathsnap/` | library: `data.py` (I/O, projection), `labels.py` (route→observation alignment, evaluation only), `candidates.py` (candidate generation and the 46 features), `dataset.py`, `models.py` (6 model definitions + the ranking scorer class), `metrics.py`, `hmm.py` (HMM/Viterbi + route filling + re-alignment), `pipeline.py` (route-free inference), `plotstyle.py` |
+| `scripts/` | `eda.py`, `eda_plots.py`, `build_dataset.py`, `baseline.py`, `train_models.py`, `tune_v2.py`, `train_final_v2.py`, `bayes_opt_v2.py`, `promote_v2.py`, `select_final_v2.py`, `learning_curve.py`, `tune_decoder.py`, `decoder_grid_v2.py`, `bridge_eval.py`, `finalize_config.py`, `hmm_ablation.py`, `error_analysis.py`, `validate_final.py`, `model_plots.py`, `make_maps.py`, `smoke_test.py`, `robustness_test.py`, `preflight.py`, `build_report.py` |
 | `api/` | FastAPI server (`server.py`) and the separate server-side evaluation step (`evaluation.py`) |
 | `ui/` | evaluator UI (`index.html`, `app.js`, Leaflet) |
-| `models/` | trained models (`*.joblib`) and `final_config.json` (model + HMM parameters used by the API) |
-| `results/` | every metric file: EDA tables, CV folds, per-model CV/test JSON + CSV, per-trip results, Optuna trial log, HMM grid/ablation |
-| `figures/` | all plots used in the report (generated by the scripts) |
+| `models/` | trained models and `final_config.json` (model + HMM parameters used by the API) |
+| `results/` | every metric file: EDA tables, CV folds, per-model CV/test JSON + CSV, per-trip results, Optuna trial logs, decoder studies, validation |
+| `figures/` | all plots and screenshots used in the report (generated by the scripts) |
 | `maps/` | interactive Folium maps (HTML) |
-| `configs/` | pipeline configuration summary |
+| `configs/` | pipeline configuration summary, starting hyperparameters, team |
+| `logs/` | API request logs: development demo and the final two-laptop evaluation |
 | `report/`, `deck/` | technical report PDF and pitch-deck sources |
+| `archive/round1_28_features/` | the earlier 28-feature round, unchanged (not used by the deployed system) |
+
+### Trained models (`models/`)
+
+| File | What it is |
+|---|---|
+| `lgbm_v2_untuned.joblib` | **deployed scorer**: LightGBM LambdaRank on the 46 features, starting hyperparameters |
+| `lgbm_v2.joblib` | the same model with the Bayesian-tuned hyperparameters (tied; not deployed) |
+| `logreg`, `gnb`, `knn`, `rf`, `lgbm`, `mlp` `.joblib` | the six binary models of the comparison, all trained on the 46 features |
+| `final_config.json` | which model the API loads, decoder parameters, and the reason for each choice |
+
+File names containing `v2` (`lgbm_v2_untuned`, `optuna_v2_*`, `tune_v2_variants`, `decoder_grid_v2`) are historical:
+they all refer to this one 46-feature table.
 
 ## Installation
 
@@ -69,30 +90,23 @@ export PATHSNAP_DATA="/path/to/Student folder"
 
 ```bash
 python scripts/eda.py               # dataset inventory -> results/eda_trips.csv
-python scripts/build_dataset.py     # candidates + features + labels (cache/)
+python scripts/build_dataset.py     # candidates (K=24) + 46 features + labels -> cache/
 python scripts/eda_plots.py         # EDA figures + data-quality table
 python scripts/baseline.py          # nearest-segment geometric baseline
-for m in logreg gnb knn rf lgbm mlp; do python scripts/train_models.py $m; done
-python scripts/bayes_opt.py 40 2700 # Optuna TPE on LightGBM (trial log in results/)
-python scripts/train_models.py lgbm_tuned
-python scripts/hmm_eval.py lgbm_tuned   # decoder grid on train OOF + test ablation
-python scripts/realign_eval.py      # before/after of the route re-alignment step (train OOF, then test)
-python scripts/error_analysis.py round1   # round-1 system: residual errors, label noise, no-.route leakage check
-# ---- round 2 (selected family only; v1 cache/results above stay untouched)
-python scripts/build_dataset.py --v2          # candidates K=24 + 46 features -> cache_v2/
-python scripts/tune_v2.py                     # candidate set / features / objective variants on the same folds
-python scripts/train_final_v2.py lgbm_v2_untuned lambdarank 3 base     # round-2 scorer with round-1 hyperparameters
-for m in logreg gnb knn rf lgbm mlp; do python scripts/train_models.py $m --fs v2; done   # all six families on the 46-feature table
-python scripts/bayes_opt_v2.py lambdarank 40 1260                      # second Bayesian search (TPE)
+for m in logreg gnb knn rf lgbm mlp; do python scripts/train_models.py $m; done   # six model families, same table
+python scripts/tune_v2.py                     # feature ablation and training objective, same folds
+python scripts/train_final_v2.py lgbm_v2_untuned lambdarank 3 base     # ranking scorer, starting hyperparameters
+python scripts/bayes_opt_v2.py lambdarank 40 1260                      # Bayesian search (Optuna TPE)
 python scripts/promote_v2.py                  # re-score its top-5 trials at full fidelity
 python scripts/train_final_v2.py lgbm_v2 lambdarank 3 promoted && python scripts/select_final_v2.py
+python scripts/learning_curve.py              # top-1 against the number of training trips (about 5 min)
 python scripts/tune_decoder.py lgbm_v2_untuned 64   # Bayesian decoder tuning with held-out training trips (not adopted)
 python scripts/decoder_grid_v2.py lgbm_v2_untuned   # 2-parameter decoder grid under the same rule (not adopted)
 python scripts/bridge_eval.py lgbm_v2_untuned      # dropout bridging on/off under a held-out rule (adopted)
 python scripts/finalize_config.py             # writes models/final_config.json from the recorded decisions
-python scripts/error_analysis.py              # deployed system: residual errors + leakage check
+python scripts/hmm_ablation.py                # scorer only vs + HMM for every model, deployed decoder
+python scripts/error_analysis.py              # residual errors + leakage check
 python scripts/validate_final.py              # trip bootstrap, label sensitivity, independent recomputation
-python scripts/learning_curve.py           # learning curves: top-1 vs number of training trips (about 5 min)
 python scripts/model_plots.py       # comparison figures + tables
 python scripts/make_maps.py --eda train 00000002
 python scripts/make_maps.py student_test 00000009 00000077
@@ -101,10 +115,11 @@ python scripts/robustness_test.py   # 16 awkward synthetic trips through a fresh
 python scripts/preflight.py         # evaluation-day check of the configured partition (see Deployment)
 python scripts/diagrams.py          # pipeline / deployment diagrams
 python scripts/build_report.py      # report/PathSnap_Technical_Report.pdf
-python scripts/deck_data.py && (cd deck && npm install && node build_deck.js)   # deck/PathSnap_Pitch_Deck.pptx
+python scripts/deck_data.py && (cd deck && npm install && node build_deck.js)   # pitch deck (it also tells the archived round)
 ```
 
-Seeds are fixed (42); folds are stored in `results/folds.json`.
+Seeds are fixed (42); folds are stored in `results/folds.json`. The starting hyperparameters of the ranking scorer
+are in `configs/start_hyperparameters.json`.
 
 ## Deployment (two laptops on the same LAN)
 
@@ -147,6 +162,8 @@ scores for three stages (classifier only, + HMM/Viterbi, + route re-alignment). 
 * Both laptops must be on the same network; some phone hotspots and campus Wi-Fi block client-to-client traffic
   (AP isolation). A phone hotspot that both laptops join, or a direct cable, usually works.
 * Test from laptop 2 first with `curl http://<LAN_IP>:8000/trips` before opening the UI.
+* `address already in use` when starting uvicorn → an older API process still holds port 8000
+  (`lsof -nP -iTCP:8000 -sTCP:LISTEN`); stop it first, otherwise laptop 2 talks to the old process.
 
 ### API
 
@@ -160,7 +177,7 @@ scores for three stages (classifier only, + HMM/Viterbi, + route re-alignment). 
 
 * Prediction (`pathsnap/pipeline.py`) loads trips with `with_route=False`; it never imports `labels.py`. `scripts/error_analysis.py` re-predicts all ten student-test trips from a folder with the `.route` files removed and checks the outputs are identical.
 * Evaluation (`api/evaluation.py`) runs **after** prediction and returns only aggregate scores — no reference geometry or labels reach the UI.
-* Student-test routes are used only by evaluation code; evaluator trips were never available during development.
+* Student-test routes are used only by evaluation code. The evaluator trips were opened only after the model, features and decoder were fixed; they were served through the API and nothing was changed afterwards. The evaluator data is not in this repository.
 
 ## Metric definitions (short)
 

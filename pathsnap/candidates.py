@@ -9,10 +9,11 @@ from scipy.spatial import cKDTree
 from .geometry import point_segment
 
 RADIUS_M = 80.0     # search radius around each GPS fix
-MAX_K = 12          # keep at most K nearest arcs (two-way roads give 2 arcs each)
+MAX_K = 24          # keep at most K nearest arcs (two-way roads give 2 arcs each)
+K_SAMPLES = 192     # index samples queried per fix before de-duplication
 SAMPLE_STEP = 10.0  # densification step for the spatial index (m)
 
-FEATURES = [
+BASE_FEATURES = [
     "d", "d_rank", "d_minus_min", "d_ratio", "n_cand", "n_cand_30",
     "cos_head", "abs_head", "speed", "cos_head_x_speed",
     "t_proj", "t_outside", "arc_len", "log_arc_len",
@@ -23,10 +24,8 @@ FEATURES = [
 
 
 # ---------------------------------------------------------------------------
-# v2 candidate/feature configuration (second tuning round; v1 above is kept
-# unchanged so the six-model benchmark stays reproducible)
-V2 = dict(radius=80.0, max_k=24, k_samples=192)
-FEATURES_V2 = FEATURES + [
+# context features (longer temporal windows, relative evidence, neighbour agreement)
+CONTEXT_FEATURES = [
     "d_prev5", "d_next5", "d_prev15", "d_next15",            # asymmetric temporal context
     "d_win5_gap", "d_win15_gap", "d_prev5_gap", "d_next5_gap",  # context distance relative to best candidate
     "d_win5_rank", "cos_win_gap",                              # rank / gap of context evidence within the fix
@@ -34,6 +33,10 @@ FEATURES_V2 = FEATURES + [
     "t_raw", "t_prev5", "t_next5",                            # along-arc position of the fix and its neighbours
     "win_nearest_share", "win_cand_share",                    # how often neighbours agree on this arc
 ]
+FEATURES = BASE_FEATURES + CONTEXT_FEATURES     # the 46 features every model in this repository is trained on
+# Aliases kept because the saved scorer and models/final_config.json call this table "v2".
+V2 = dict(radius=RADIUS_M, max_k=MAX_K, k_samples=K_SAMPLES)
+FEATURES_V2 = FEATURES
 
 
 class ArcIndex:
@@ -81,9 +84,10 @@ def _gps_heading(xy, t, half=2):
     return v, speed
 
 
-def build_candidates(trip, radius=RADIUS_M, max_k=MAX_K, index=None, k_samples=96, v2=False):
+def build_candidates(trip, radius=RADIUS_M, max_k=MAX_K, index=None, k_samples=K_SAMPLES, v2=True):
     """Return a DataFrame with one row per (observation, candidate arc) and the
-    feature columns in FEATURES. Original trip id and arc id are preserved."""
+    feature columns in FEATURES (46). Original trip id and arc id are preserved.
+    v2=False returns only BASE_FEATURES (used for the feature-subset ablation and the archived models)."""
     xy, t = trip.xy, trip.track[:, 2]
     n = len(xy)
     idx = index or ArcIndex(trip)
@@ -94,7 +98,7 @@ def build_candidates(trip, radius=RADIUS_M, max_k=MAX_K, index=None, k_samples=9
                        "t_outside": np.abs(traw - tc)})
     df = df[df.d <= radius]
     if len(df) == 0:                # no candidate arc for any fix: empty, correctly typed table
-        cols = ["trip", "obs", "arc"] + (FEATURES_V2 if v2 else FEATURES)
+        cols = ["trip", "obs", "arc"] + (FEATURES if v2 else BASE_FEATURES)
         out = pd.DataFrame({c: np.zeros(0, dtype=(object if c == "trip" else np.int64 if c in ("obs", "arc") else np.float32))
                             for c in cols})
         return out
@@ -204,7 +208,7 @@ def build_candidates(trip, radius=RADIUS_M, max_k=MAX_K, index=None, k_samples=9
         df["win_cand_share"] = np.mean([member(o) for o in (-10, -5, -3, -1, 1, 3, 5, 10)], axis=0)
     df.insert(0, "trip", trip.trip_id)
     df["d_rank"] = df["d_rank"].astype(np.int16)
-    for c in (FEATURES_V2 if v2 else FEATURES):
+    for c in (FEATURES if v2 else BASE_FEATURES):
         if df[c].dtype == np.float64:
             df[c] = df[c].astype(np.float32)
     return df
