@@ -7,15 +7,27 @@ predictions and computes accuracy against its private reference routes; a
 static evaluator UI (laptop 2) lists the evaluation trips, sends the selected
 trip ID and shows the predicted route and scores.
 
-Headline numbers (all from files in `results/`, reproduced by the commands
-below) are in the technical report `report/PathSnap_Technical_Report.pdf`.
+## Headline results (10 student-test trips)
+
+| Stage | Top-1 | Macro-F1 | Continuity |
+|---|---|---|---|
+| Nearest-segment baseline | 0.545 | 0.366 | 0.805 |
+| Tuned LightGBM (classifier only) | 0.911 | 0.863 | 0.952 |
+| + HMM/Viterbi | 0.952 | 0.941 | 0.980 |
+| + re-alignment to the predicted route (final) | **0.975** | **0.970** | **0.979** |
+
+Length-weighted route F1 of the decoded route: 0.990. The last step was selected on the 80 training
+trips with out-of-fold scores (top-1 0.938 -> 0.957). Sources:
+`results/realign_summary.json`, `results/baseline_nearest.json`, `results/error_breakdown.json`. Full analysis:
+`report/PathSnap_Technical_Report.pdf`. Labels are derived by aligning fixes to the supplied route and carry some
+noise (1.6% of moving fixes are labelled against the direction of travel).
 
 ## Repository layout
 
 | Folder | Contents |
 |---|---|
 | `pathsnap/` | library: `data.py` (I/O, projection), `labels.py` (route→observation alignment, evaluation only), `candidates.py` (candidate generation + 28 features), `dataset.py`, `models.py` (6 model definitions), `metrics.py`, `hmm.py` (HMM/Viterbi + route filling), `pipeline.py` (route-free inference), `plotstyle.py` |
-| `scripts/` | `eda.py`, `eda_plots.py`, `build_dataset.py`, `baseline.py`, `train_models.py`, `bayes_opt.py`, `hmm_eval.py`, `model_plots.py`, `make_maps.py`, `smoke_test.py`, `build_report.py` |
+| `scripts/` | `eda.py`, `eda_plots.py`, `build_dataset.py`, `baseline.py`, `train_models.py`, `bayes_opt.py`, `hmm_eval.py`, `realign_eval.py`, `error_analysis.py`, `model_plots.py`, `make_maps.py`, `smoke_test.py`, `build_report.py` |
 | `api/` | FastAPI server (`server.py`) and the separate server-side evaluation step (`evaluation.py`) |
 | `ui/` | evaluator UI (`index.html`, `app.js`, Leaflet) |
 | `models/` | trained models (`*.joblib`) and `final_config.json` (model + HMM parameters used by the API) |
@@ -53,6 +65,8 @@ for m in logreg gnb knn rf lgbm mlp; do python scripts/train_models.py $m; done
 python scripts/bayes_opt.py 40 2700 # Optuna TPE on LightGBM (trial log in results/)
 python scripts/train_models.py lgbm_tuned
 python scripts/hmm_eval.py lgbm_tuned   # decoder grid on train OOF + test ablation
+python scripts/realign_eval.py      # before/after of the route re-alignment step (train OOF, then test)
+python scripts/error_analysis.py    # residual-error breakdown, label-noise check, no-.route leakage check
 python scripts/model_plots.py       # comparison figures + tables
 python scripts/make_maps.py --eda train 00000002
 python scripts/make_maps.py student_test 00000009 00000077
@@ -90,7 +104,7 @@ python -m http.server 8080
 The UI lists the trips returned by `GET /trips` (read from the partition
 folder, nothing hardcoded), sends `POST /predict {"trip_id": ...}`, draws the
 returned GPS fixes and predicted route on a map, and shows the server-side
-scores (classifier-only vs classifier+HMM). The map tiles need internet access.
+scores for three stages (classifier only, + HMM/Viterbi, + route re-alignment). The map tiles need internet access.
 
 ### LAN troubleshooting (checked on our laptop 1)
 
@@ -112,7 +126,7 @@ scores (classifier-only vs classifier+HMM). The map tiles need internet access.
 
 ### Leakage guarantees
 
-* Prediction (`pathsnap/pipeline.py`) loads trips with `with_route=False`; it never imports `labels.py`.
+* Prediction (`pathsnap/pipeline.py`) loads trips with `with_route=False`; it never imports `labels.py`. `scripts/error_analysis.py` re-predicts all ten student-test trips from a folder with the `.route` files removed and checks the outputs are identical.
 * Evaluation (`api/evaluation.py`) runs **after** prediction and returns only aggregate scores — no reference geometry or labels reach the UI.
 * Student-test routes are used only by evaluation code; evaluator trips were never available during development.
 

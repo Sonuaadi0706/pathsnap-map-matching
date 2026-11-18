@@ -24,6 +24,8 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 
+from .geometry import monotone_align
+
 NEG = -1e18
 
 
@@ -224,3 +226,22 @@ def reconstruct_route(pred, seg, graph, fill=True):
         route.append(int(a))
         prev, prev_seg = a, s
     return np.array(route, dtype=np.int64), n_fill_fail
+
+
+def realign_to_route(trip, pred, route, max_dist_m=80.0):
+    """Decoder post-step (reference-free). Viterbi decides WHICH arcs are driven; this step decides
+    which fix belongs to which arc of that predicted route, using a monotone (order-preserving)
+    nearest-arc assignment along the route. It removes arc-boundary jitter of the per-fix states and
+    assigns fixes to short arcs that were only inserted by shortest-path filling.
+    Fixes without a Viterbi state stay unmatched (-1); a fix keeps its Viterbi arc if the re-assigned
+    arc would be farther than max_dist_m (safety for wrongly filled stretches)."""
+    out = pred.copy()
+    m = np.where(pred >= 0)[0]
+    if len(m) == 0 or len(route) == 0:
+        return out
+    a = trip.node_xy[trip.arcs[route, 0]]
+    b = trip.node_xy[trip.arcs[route, 1]]
+    idx, dist = monotone_align(trip.xy[m], a, b)
+    ok = dist <= max_dist_m
+    out[m[ok]] = route[idx[ok]]
+    return out

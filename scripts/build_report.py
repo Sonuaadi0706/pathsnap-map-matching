@@ -42,6 +42,14 @@ HPT = pd.read_csv(RES / "hmm_test_pertrip.csv", dtype={"trip": str})
 HGRID = pd.read_csv(RES / "hmm_grid.csv")
 FI = pd.read_csv(RES / "feature_importance_lgbm_tuned.csv", index_col=0).iloc[:, 0].sort_values(ascending=False)
 SMOKE = J("smoke_test.json")
+RE = J("realign_summary.json")
+RET = pd.read_csv(RES / "realign_test.csv", dtype={"trip": str}).set_index("trip")
+RETR = pd.read_csv(RES / "realign_train_oof.csv", dtype={"trip": str})
+ERR = J("error_breakdown.json")
+APIALL = pd.read_csv(RES / "api_all_trips.csv", dtype={"trip": str})
+assert ERR["predictions_identical_without_route_files"] and (APIALL.status == "ok").all()
+assert RE["train"]["realign"]["top1"] > RE["train"]["hmm"]["top1"] and RE["student_test"]["realign"]["top1"] > RE["student_test"]["hmm"]["top1"]
+FT, FTR = RE["student_test"], RE["train"]
 FINAL = json.load(open(ROOT / "models/final_config.json"))
 TEAM = json.load(open(ROOT / "configs/team.json")) if (ROOT / "configs/team.json").exists() else {}
 SEL = HSUM["selected_model"]
@@ -143,10 +151,12 @@ P("<b>Summary.</b> Each GPS fix is matched to a road arc in two stages. (1) A ca
   "kinematic, temporal-context and topology features. Six models from six algorithm families were trained "
   "with identical candidates, labels and 5-fold trip-grouped cross-validation on the 80 training trips. "
   f"LightGBM was best on every quality metric and was tuned with Optuna TPE ({OPT['n_trials']} trials). "
-  "(2) An HMM decoded with Viterbi over the directed road graph turns the per-fix scores into a connected route. "
-  f"On the 10 student-test trips the final system reaches observation top-1 accuracy <b>{f3(hm.hmm_top1)}</b> "
-  f"(classifier alone {f3(hm.cls_top1)}, nearest-segment baseline {f3(BASE['student_test']['obs_top1'])}), "
-  f"route continuity <b>{f3(hm.hmm_continuity)}</b> and length-weighted route F1 <b>{f3(hm.hmm_route_f1)}</b>. "
+  "(2) An HMM decoded with Viterbi over the directed road graph turns the per-fix scores into a connected route, "
+  "and each fix is then re-assigned to an arc of that predicted route in travel order. "
+  f"On the 10 student-test trips the final system reaches observation top-1 accuracy <b>{f3(FT['realign']['top1'])}</b> "
+  f"(classifier alone {f3(FT['cls']['top1'])}, classifier + Viterbi {f3(FT['hmm']['top1'])}, nearest-segment baseline "
+  f"{f3(BASE['student_test']['obs_top1'])}), macro-F1 <b>{f3(FT['realign']['macro_f1'])}</b>, route continuity "
+  f"<b>{f3(FT['realign']['continuity'])}</b> and length-weighted route F1 <b>{f3(hm.hmm_route_f1)}</b>. "
   "A FastAPI service (laptop 1) and a browser UI (laptop 2) run the full pipeline per selected trip and score it "
   "against server-side reference routes that never reach the model or the UI.")
 fig("diagram_pipeline.png", "Figure 1. PathSnap pipeline. Dark boxes are learned / decoded components.")
@@ -525,15 +535,23 @@ qa("5. Disconnected road segments", "Pairs with no directed path within the sear
    "fixes jump between components) the chain is cut at i and decoding restarts, instead of forcing an absurd "
    "path. For the output route, consecutive distinct arcs inside a chain are joined with the shortest path; "
    "across chain breaks no path is invented.")
-qa("6. Decoder parameters", "Chosen by out-of-fold top-1 on the 80 training trips (5-fold OOF probabilities "
+qa("Viterbi recurrence (decoding procedure)", "Within a chain of fixes i = 1..n with candidate sets C<sub>i</sub>: "
+   "&delta;<sub>1</sub>(c) = log e<sub>1</sub>(c); &delta;<sub>i</sub>(c') = log e<sub>i</sub>(c') + "
+   "max<sub>c &isin; C<sub>i-1</sub></sub> [ &delta;<sub>i-1</sub>(c) + log a(c, c') ], with back-pointer "
+   "&psi;<sub>i</sub>(c') = argmax<sub>c</sub> [ &delta;<sub>i-1</sub>(c) + log a(c, c') ]. The chain ends at the "
+   "last fix or at a break; the best final state argmax<sub>c</sub> &delta;<sub>n</sub>(c) is traced back through "
+   "&psi; to give one arc per fix. Scores are kept in the log domain; the transition matrix of each step "
+   "(at most 12 &times; 12) is built with numpy from pre-computed shortest-path distances, so a trip of several "
+   "thousand fixes decodes in well under a second (Table 9).")
+qa("Decoder parameters", "Chosen by out-of-fold top-1 on the 80 training trips (5-fold OOF probabilities "
    "from the selected model), never on student-test. A first grid &beta; &isin; {5, 10, 20, 40, 80} m &times; "
    "w &isin; {0.5, 1, 2} had its optimum on the boundary (&beta; = 5, w = 0.5), so it was extended to "
    f"&beta; &isin; {{2, 3.5}} and w &isin; {{0.25, 0.35}} ({len(HGRID)} settings in total). Selected: &beta; = "
    f"{hp['beta']}, w = {hp['w_emit']} (Figure 21). Small &beta; and w mean the decoder trusts path geometry "
    "strongly relative to single-fix scores, which suits 1 Hz data where consecutive fixes are only 10-20 m apart.")
 fig("hmm_grid.png", "Figure 21. Decoder grid: training-trip OOF top-1 after HMM.", width=W * 0.6)
-hrows = [["Model (scores)", "Top-1 cls", "Top-1 HMM", "Continuity cls", "Continuity HMM", "Route F1 cls",
-          "Route F1 HMM", "Trips HMM hurt top-1", "Trips HMM hurt route F1"]]
+hrows = [["Model (scores)", "Top-1 cls", "Top-1 HMM", "Cont. cls", "Cont. HMM", "Route F1 cls",
+          "Route F1 HMM", "Trips worse (top-1)", "Trips worse (route F1)"]]
 order = [m for m in ["baseline"] + MODELS + ["lgbm_tuned"] if m in HAB.index]
 for m in order:
     r = HAB.loc[m]
@@ -544,21 +562,24 @@ table(hrows, widths=[3.6 * cm, 1.5 * cm, 1.5 * cm, 1.7 * cm, 1.7 * cm, 1.5 * cm,
 P("Table 8. Classifier-only vs classifier + HMM on the 10 student-test trips with the same decoder parameters "
   "(results/hmm_ablation_models.csv). Top-1 is pooled over fixes; continuity and route F1 are trip means. "
   "Route F1 for classifier-only uses the collapsed per-fix arcs; for HMM the route with shortest-path filling.", CAP)
-P("<b>Did HMM decoding improve the route?</b> " +
+P("<b>6. Did HMM decoding improve the final route?</b> " +
   f"Yes for the selected model: top-1 {f3(HAB.loc[SEL, 'cls_top1'])} &rarr; {f3(HAB.loc[SEL, 'hmm_top1'])}, "
   f"continuity {f3(HAB.loc[SEL, 'cls_continuity'])} &rarr; {f3(HAB.loc[SEL, 'hmm_continuity'])}, route F1 "
   f"{f3(HAB.loc[SEL, 'cls_route_f1'])} &rarr; {f3(HAB.loc[SEL, 'hmm_route_f1'])}. The gain is largest for weak "
   f"scorers (nearest-segment top-1 {f3(HAB.loc['baseline', 'cls_top1'])} &rarr; {f3(HAB.loc['baseline', 'hmm_top1'])}), "
   "showing that topology and timing recover much of what a pointwise scorer misses, while a good scorer still "
-  "gives the best end result.")
-ptrows = [["Trip", "Fixes", "Top-1 cls", "Top-1 HMM", "Cont. cls", "Cont. HMM", "Route F1 cls", "Route F1 HMM",
+  f"gives the best end result. Observation macro-F1 for the selected model rises from {f3(FT['cls']['macro_f1'])} to "
+  f"{f3(FT['hmm']['macro_f1'])} after Viterbi. Log loss is N/A for decoded outputs: Viterbi returns a single best "
+  "path, not a per-fix probability distribution.")
+ptrows = [["Trip", "Fixes", "Top-1 cls", "Top-1 HMM", "Top-1 final", "Cont. cls", "Cont. HMM", "Route F1 cls", "Route F1 HMM",
            "Route P / R (HMM)", "Chains", "Decode s"]]
 for _, r in sel_pt.iterrows():
-    ptrows.append([r.trip, int(r.n_obs), f3(r.cls_top1), f3(r.hmm_top1), f3(r.cls_continuity), f3(r.hmm_continuity),
+    ptrows.append([r.trip, int(r.n_obs), f3(r.cls_top1), f3(r.hmm_top1), f3(RET.loc[r.trip, "realign_top1"]), f3(r.cls_continuity), f3(r.hmm_continuity),
                    f3(r.cls_route_f1), f3(r.hmm_route_f1), f"{r.hmm_route_precision:.3f} / {r.hmm_route_recall:.3f}",
                    int(r.hmm_segments), f"{r.decode_time_s:.2f}"])
 table(ptrows)
-P(f"Table 9. Per-trip effect of the decoder for {NAMES[SEL]} (results/hmm_test_pertrip.csv).", CAP)
+P(f"Table 9. Per-trip effect of the decoder for {NAMES[SEL]} (results/hmm_test_pertrip.csv; 'Top-1 final' = after the "
+  "route re-alignment step of Section 5.1, results/realign_test.csv).", CAP)
 hurt_txt = []
 if len(hurt_top1):
     hurt_txt.append("top-1 decreased on " + ", ".join(f"{r.trip} ({r.cls_top1:.3f} &rarr; {r.hmm_top1:.3f})" for _, r in hurt_top1.iterrows()))
@@ -587,6 +608,57 @@ table(brow)
 P("Table 10. Training trips (OOF) where the decoder lowered top-1 or route F1 (results/hmm_train_oof_pertrip.csv).", CAP)
 fig("hmm_ablation_models.png", "Figure 22. Effect of HMM decoding for every model's scores (student-test).")
 fig("hmm_pertrip.png", f"Figure 23. Per-trip classifier-only vs classifier + HMM ({NAMES[SEL]}).")
+P("5.1 Final per-fix assignment: re-alignment to the predicted route", H2)
+eh, ef = ERR["errors"]["hmm_pred"], ERR["errors"]["final_pred"]
+P("An error analysis of the Viterbi output on student-test (scripts/error_analysis.py) showed that "
+  f"{pc(eh['adjacent_on_route'] / eh['n_errors'])} of its wrong fixes were matched to the arc immediately before or "
+  "after the reference arc <i>on the correct route</i>: the route is right, but the per-fix states switch arcs a few "
+  "fixes too early or too late, and short arcs inserted by shortest-path filling receive no fix at all. We therefore "
+  "added a reference-free post-step (pathsnap/hmm.py, realign_to_route): Viterbi decides <i>which arcs are driven</i>; "
+  "the fixes are then assigned to the arcs of that predicted route by a monotone (order-preserving) nearest-arc "
+  "dynamic programme, the same assignment convention that defines the labels, applied to the predicted route "
+  "instead of the reference. A fix keeps its Viterbi arc if the re-assigned arc would be more than 80 m away, and "
+  "unmatched fixes stay unmatched. The step was accepted on the 80 training trips (out-of-fold scores) before "
+  "student-test was looked at.")
+rr = [["Partition (same scores, decoder, labels)", "Stage", "Top-1", "Macro-F1", "Continuity", "Trips better / worse vs Viterbi"]]
+for lab_, S_ in [("80 training trips, out-of-fold", FTR), ("10 student-test trips", FT)]:
+    rr.append([lab_, "classifier only", f4(S_["cls"]["top1"]), f4(S_["cls"]["macro_f1"]), f4(S_["cls"]["continuity"]), "-"])
+    rr.append(["", "+ HMM/Viterbi", f4(S_["hmm"]["top1"]), f4(S_["hmm"]["macro_f1"]), f4(S_["hmm"]["continuity"]), "-"])
+    rr.append(["", "+ re-alignment (final)", f4(S_["realign"]["top1"]), f4(S_["realign"]["macro_f1"]), f4(S_["realign"]["continuity"]),
+               f"{S_['trips_realign_better_top1']} / {S_['trips_realign_worse_top1']}"])
+table(rr, widths=[4.6 * cm, 3.6 * cm, 1.7 * cm, 1.8 * cm, 1.9 * cm, 3.4 * cm])
+P("Table 11. Before/after for the re-alignment step (scripts/realign_eval.py, results/realign_summary.json, per-trip CSVs "
+  "results/realign_train_oof.csv and results/realign_test.csv). Top-1 pooled over scored fixes; macro-F1 and "
+  "continuity are trip means.", CAP)
+worse = RETR[RETR.realign_top1 < RETR.hmm_top1 - 1e-12]
+P(f"Top-1 improves on {FTR['trips_realign_better_top1']} of 80 training trips and on all 10 student-test trips; "
+  f"continuity is unchanged within 0.002. It gets worse on {len(worse)} training trips "
+  f"({', '.join(f'{r.trip} ({r.hmm_top1:.3f} to {r.realign_top1:.3f})' for _, r in worse.iterrows())}): when the predicted "
+  "route itself contains a wrong detour, re-alignment spreads fixes onto it. Because the per-fix assignment now "
+  "follows the same convention as the labels, the final top-1 is essentially a measure of how correct the "
+  "predicted route is; it does not use the reference in any way (Section 5.2 verifies this).")
+P("5.2 Residual errors, label noise and leakage check", H2)
+er = [["Stage", "Errors / scored fixes", "Error rate", "Neighbour arc on route", "Opposite direction", "Other arc on route", "Off the reference route"]]
+for k_, n_ in [("cls_pred", "classifier only"), ("hmm_pred", "+ HMM/Viterbi"), ("final_pred", "+ re-alignment (final)")]:
+    e_ = ERR["errors"][k_]
+    er.append([n_, f"{e_['n_errors']:,} / {ERR['n_scored_fixes']:,}", pc(e_["error_rate"]), e_["adjacent_on_route"],
+               e_["reverse_direction"], e_["other_on_route"], e_["off_route"]])
+table(er, widths=[3.6 * cm, 2.8 * cm, 1.6 * cm, 2.4 * cm, 2.2 * cm, 2.2 * cm, 2.4 * cm])
+P("Table 12. Residual-error breakdown on the 10 student-test trips (results/error_breakdown.json).", CAP)
+ln = ERR["label_noise"]
+P(f"<b>Label noise.</b> {ln['label_against_motion']} of {ln['moving_scored_fixes']:,} scored fixes recorded while moving "
+  f"faster than 3 m/s ({pc(ln['share'])}) have a reference label whose arc direction points <i>against</i> the GPS "
+  "direction of travel (cosine &lt; -0.5). The label alignment is geometry-only, so on out-and-back stretches of a "
+  "two-way street a fix can be assigned to either direction's arc. Of the "
+  f"{ln['final_reverse_direction_errors_while_moving']} final opposite-direction errors made while moving, "
+  f"{ln['of_which_label_against_motion']} fall in this group, i.e. the prediction follows the direction of travel and "
+  "the label does not. We did not change the label protocol (all models share it), but this bounds how much of the "
+  "remaining error is attributable to the reference rather than to the model, and it is why we do not claim the "
+  "remaining error is purely model error.")
+P("<b>Leakage check.</b> The ten student-test trips were copied to a temporary folder <i>without</i> their .route "
+  "files and predicted again: classifier arcs, Viterbi arcs, final arcs and routes were identical for all ten trips "
+  "(results/error_breakdown.json, predictions_identical_without_route_files = true). Independent recomputation of "
+  "top-1, macro-F1 and log loss from the saved per-candidate scores reproduced the reported values exactly.")
 story.append(PageBreak())
 
 # ================================================================== 6 Folium
@@ -611,10 +683,11 @@ P("<b>Backend (laptop 1).</b> api/server.py (FastAPI + uvicorn, bound to 0.0.0.0
   f"models/final_config.json (model = {FINAL['model']}, &beta; = {hp['beta']}, w = {hp['w_emit']}) and the model "
   "file once at start-up. GET /trips lists the trip folders of the configured partition (PATHSNAP_PARTITION), "
   "so the ten reserved evaluator trips are discovered from disk, not hardcoded. POST /predict {trip_id} runs (1) "
-  "the route-free pipeline: load trip without its .route, candidates, features, classifier, HMM, route filling; "
+  "the route-free pipeline: load trip without its .route, candidates, features, classifier, HMM, route filling, "
+  "re-alignment; "
   "then (2) a separate evaluation step (api/evaluation.py) that reads the private reference route, derives "
   "per-fix labels with the same alignment as in training, and computes top-1, macro-F1, continuity and route "
-  "precision/recall/F1 for classifier-only and HMM outputs. Only these aggregate scores, the predicted route and "
+  "precision/recall/F1 for the classifier-only, Viterbi and final outputs. Only these aggregate scores, the predicted route and "
   "the GPS fixes are returned; reference geometry and labels never leave the server. Every request is logged "
   "(console + logs/api_requests.log) with client IP, status, latency, trip and accuracy, for the evaluator to "
   "inspect on laptop 1.")
@@ -622,13 +695,16 @@ P("<b>UI (laptop 2).</b> ui/index.html + app.js, a static page served with pytho
   "address is entered once (or passed as ?api=http://&lt;laptop-1-IP&gt;:8000). It lists the trips returned by "
   "/trips as buttons, posts the selected ID, draws the GPS fixes and predicted route on a Leaflet map, and shows "
   "the server-side scores and timings.")
-lat_rows = [["Trip", "Fixes", "Pipeline time (s)", "Top-1 cls", "Top-1 HMM"]]
-for t in ["00000009", "00000077"]:
-    r = SMOKE[t]
-    lat_rows.append([t, r["n_observations"], r["seconds"], f3(r["acc_cls"]), f3(r["acc_hmm"])])
-table(lat_rows, widths=[3 * cm, 2 * cm, 3 * cm, 2.5 * cm, 2.5 * cm])
-P("Table 11. End-to-end request latency measured by scripts/smoke_test.py through HTTP in a fresh server process "
-  "(results/smoke_test.json).", CAP)
+lat_rows = [["Trip", "Status", "Fixes", "Round trip (s)", "Route arcs", "Top-1 cls", "Top-1 HMM", "Top-1 final", "Macro-F1 final",
+             "Continuity final", "Route F1"]]
+for _, r in APIALL.iterrows():
+    lat_rows.append([r.trip, r.status, int(r.n_obs), f"{r.seconds:.2f}", int(r.route_arcs), f3(r.top1_cls), f3(r.top1_hmm),
+                     f3(r.top1_final), f3(r.macro_f1_final), f3(r.continuity_final), f3(r.route_f1)])
+table(lat_rows)
+P("Table 13. All ten student-test trips requested from the running API over HTTP by a separate client process: status, "
+  "round-trip latency and the scores returned by the server-side evaluation (results/api_all_trips.csv). "
+  f"Slowest request {APIALL.seconds.max():.2f} s. A fresh-process smoke test (scripts/smoke_test.py) additionally covers a "
+  "synthetic trip with a 100-fix dropout and an unknown trip ID (404).", CAP)
 fig("screenshot_ui.png", "Figure 27. Working evaluator UI (served locally, API on the same machine during "
     "development): trip list, predicted route and server-side evaluation.", width=W * 0.9, maxh=12.5 * cm)
 fig("screenshot_api_docs.png", "Figure 28. Successful POST /predict response (FastAPI interactive docs).",
@@ -648,7 +724,9 @@ story.append(PageBreak())
 # ================================================================== 8 limitations
 P("8. Limitations and Reproducibility", H1)
 P("<b>Limitations.</b> (1) Observation labels come from aligning fixes to the supplied route; where the route is "
-  "incomplete or the alignment is ambiguous (fixes near an intersection could belong to either arc) the labels and "
+  "incomplete or the alignment is ambiguous (fixes near an intersection, or either direction of a two-way street on "
+  f"out-and-back stretches: {pc(ERR['label_noise']['share'])} of moving fixes have a label against the direction of "
+  "travel, Section 5.2) the labels and "
   "therefore every observation metric inherit that uncertainty; off-route fixes (&gt;60 m, "
   f"{int(QUAL.set_index('check').loc['observations flagged off-route (>60 m)', 'train']):,} in train, "
   f"{int(QUAL.set_index('check').loc['observations flagged off-route (>60 m)', 'student_test'])} in student-test) are "
@@ -664,6 +742,18 @@ P("<b>Reproducibility.</b> Fixed seed 42; fold assignment stored in results/fold
 P("<b>AI assistance disclosure.</b> An AI coding assistant (Claude) was used to help write code and draft this "
   "report under the team's direction. All experiments were actually executed; all numbers, plots and screenshots "
   "come from the committed scripts and logs.")
+P("9. Conclusion", H1)
+P(f"Nearest-segment matching is right for only {pc(BASE['student_test']['obs_top1'])} of student-test fixes, mainly "
+  "because two-way streets put two arcs at the same distance. A learned candidate scorer with heading and "
+  f"temporal-context features raises this to {pc(FT['cls']['top1'])}; all six model families beat the baseline by a "
+  "wide margin and LightGBM is best on every quality metric, although Bayesian tuning changed its accuracy by less "
+  "than the fold-to-fold noise. Sequence decoding matters as much as the scorer: HMM/Viterbi over the road graph "
+  f"lifts top-1 to {pc(FT['hmm']['top1'])} and continuity to {pc(FT['hmm']['continuity'])}, and re-assigning fixes "
+  f"along the predicted route gives the final {pc(FT['realign']['top1'])} top-1, {pc(FT['realign']['macro_f1'])} "
+  f"macro-F1 and {pc(hm.hmm_route_f1)} route F1, in about a second per trip through the API. The remaining "
+  f"{pc(ERR['errors']['final_pred']['error_rate'])} of errors are roughly half genuinely off-route matches and half "
+  "arc-boundary or direction disagreements, part of which trace back to the reference labels. All numbers are "
+  "development-stage results on the ten student-test trips; the reserved evaluator trips were never available to us.")
 P("Appendix A. Optuna trial record", H2)
 trows = [["Trial", "CV top-1", "CV macro-F1", "n_est.", "lr", "leaves", "min_child", "subsample", "colsample", "lambda", "alpha"]]
 for _, r in comp.sort_values("number").iterrows():

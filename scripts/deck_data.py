@@ -27,8 +27,16 @@ pt = pd.read_csv(RES / "hmm_test_pertrip.csv", dtype={"trip": str})
 pt = pt[pt.model == sel]
 team = json.load(open(ROOT / "configs/team.json")) if (ROOT / "configs/team.json").exists() else {}
 
+re_ = J("realign_summary.json")
+err = J("error_breakdown.json")
+api = pd.read_csv(RES / "api_all_trips.csv", dtype={"trip": str})
+rt = pd.read_csv(RES / "realign_test.csv", dtype={"trip": str})
 d = {
     "team": team,
+    "final": {"test": re_["student_test"], "train": re_["train"], "errors": err["errors"], "label_noise": err["label_noise"],
+              "identical_without_route": err["predictions_identical_without_route_files"],
+              "api_max_s": float(api.seconds.max()), "api_ok": int((api.status == "ok").sum()),
+              "pertrip": rt[["trip", "cls_top1", "hmm_top1", "realign_top1"]].to_dict("records")},
     "data": {"train_trips": int((eda.partition == "train").sum()), "test_trips": int((eda.partition == "student_test").sum()),
              "train_fixes": int(eda[eda.partition == "train"].n_obs.sum()),
              "test_fixes": int(eda[eda.partition == "student_test"].n_obs.sum()),

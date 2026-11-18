@@ -12,7 +12,7 @@ import numpy as np
 from .candidates import build_candidates
 from .data import load_trip
 from .dataset import X_of
-from .hmm import HMMParams, decode, reconstruct_route
+from .hmm import HMMParams, decode, realign_to_route, reconstruct_route
 from .metrics import normalise_scores
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +24,7 @@ class Predictor:
         self.cfg = cfg
         self.model = joblib.load(Path(model_dir) / f"{cfg['model']}.joblib")
         self.hmm = HMMParams(**cfg["hmm_params"])
+        self.realign = bool(cfg.get("realign", True))
 
     def score(self, cands):
         cands = cands.copy()
@@ -53,6 +54,9 @@ class Predictor:
             pred, seg, g = decode(trip, cands, self.hmm)
             route, nfail = reconstruct_route(pred, seg, g)
             timings["hmm_s"] = time.time() - t0
-            out.update(hmm_pred=pred, segments=seg, route=route, graph=g, fill_failures=nfail)
+            t0 = time.time()
+            final = realign_to_route(trip, pred, route) if self.realign else pred
+            timings["realign_s"] = time.time() - t0
+            out.update(hmm_pred=pred, final_pred=final, segments=seg, route=route, graph=g, fill_failures=nfail)
         timings["total_s"] = sum(v for k, v in timings.items() if k != "total_s")
         return out

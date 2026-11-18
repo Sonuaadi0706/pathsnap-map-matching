@@ -74,7 +74,7 @@ def main():
             n_obs = len(np.loadtxt(part / t / f"{t}.track"))
             route = np.array(r["predicted_route_arc_ids"])
             conn = float(np.mean(arcs[route[:-1], 1] == arcs[route[1:], 0])) if len(route) > 1 else float("nan")
-            keys = set(r.keys()) | set(r["evaluation"].keys())
+            keys = set(r.keys()) | set(r["evaluation"].keys()) | set(r["evaluation"]["stages"]["final"].keys())
             report[t] = {
                 "seconds": round(el, 2), "n_observations": r["n_observations"],
                 "n_matched": r["n_matched_observations"], "route_arcs": len(route),
@@ -83,8 +83,9 @@ def main():
                 "obs_count_matches_file": r["n_observations"] == n_obs,
                 "no_reference_fields": not any(k in keys for k in ("route", "reference_route", "labels", "lab")),
                 "evaluation_available": r["evaluation"].get("available"),
-                "acc_hmm": r["evaluation"].get("observation_top1_accuracy_hmm"),
-                "acc_cls": r["evaluation"].get("observation_top1_accuracy_classifier_only"),
+                "acc_final": r["evaluation"]["stages"]["final"]["observation_top1_accuracy"],
+                "acc_hmm": r["evaluation"]["stages"]["hmm"]["observation_top1_accuracy"],
+                "acc_cls": r["evaluation"]["stages"]["classifier_only"]["observation_top1_accuracy"],
             }
             print(t, report[t], flush=True)
         report["checks"]["missing_candidates_handled"] = (report["99999999"]["n_matched"] < report["99999999"]["n_observations"]

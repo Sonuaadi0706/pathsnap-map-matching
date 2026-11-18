@@ -45,8 +45,8 @@ for h in (logging.StreamHandler(sys.stdout), logging.FileHandler(ROOT / "logs" /
 app = FastAPI(title="PathSnap map-matching API", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 predictor = Predictor()
-log.info("model loaded: %s | hmm=%s | data=%s | partition=%s",
-         predictor.cfg["model"], predictor.cfg["hmm_params"], DATA_ROOT, PARTITION)
+log.info("model loaded: %s | hmm=%s | realign=%s | partition=%s",
+         predictor.cfg["model"], predictor.cfg["hmm_params"], predictor.realign, PARTITION)
 
 
 class PredictRequest(BaseModel):
@@ -92,7 +92,7 @@ def predict(req: PredictRequest):
     log.info("PREDICT request trip=%s", tid)
     # ---- 1. prediction (route-free) ----
     out = predictor.predict_trip(tid, PARTITION, DATA_ROOT, use_hmm=True)
-    trip, route, hmm_pred = out["trip"], out["route"], out["hmm_pred"]
+    trip, route, hmm_pred, final_pred = out["trip"], out["route"], out["hmm_pred"], out["final_pred"]
     nodes = trip.nodes
     route_lines = [[[float(nodes[trip.arcs[a, 0], 1]), float(nodes[trip.arcs[a, 0], 0])],
                     [float(nodes[trip.arcs[a, 1], 1]), float(nodes[trip.arcs[a, 1], 0])]] for a in route]
@@ -100,17 +100,17 @@ def predict(req: PredictRequest):
     gps = _latlon(trip, trip.track[::step, :2])
     # ---- 2. separate server-side evaluation against the private reference ----
     t0 = time.time()
-    ev = evaluate_prediction(trip, out["cls_pred"], hmm_pred, route, out["graph"], PARTITION, DATA_ROOT)
+    ev = evaluate_prediction(trip, out["cls_pred"], hmm_pred, final_pred, route, out["graph"], PARTITION, DATA_ROOT)
     out["timings"]["evaluation_s"] = time.time() - t0
-    log.info("PREDICT done trip=%s obs=%d route_arcs=%d acc_hmm=%s acc_cls=%s total=%.2fs",
-             tid, trip.n_obs, len(route), f"{ev.get('observation_top1_accuracy_hmm', float('nan')):.4f}",
-             f"{ev.get('observation_top1_accuracy_classifier_only', float('nan')):.4f}",
-             out["timings"]["total_s"])
+    st = ev.get("stages", {})
+    acc = lambda k: f"{st[k]['observation_top1_accuracy']:.4f}" if k in st else "n/a"  # noqa: E731
+    log.info("PREDICT done trip=%s obs=%d route_arcs=%d acc_final=%s acc_hmm=%s acc_cls=%s total=%.2fs",
+             tid, trip.n_obs, len(route), acc("final"), acc("hmm"), acc("classifier_only"), out["timings"]["total_s"])
     return {
         "trip_id": tid,
         "model": predictor.cfg["model"],
         "n_observations": trip.n_obs,
-        "n_matched_observations": int((hmm_pred >= 0).sum()),
+        "n_matched_observations": int((final_pred >= 0).sum()),
         "n_route_arcs": int(len(route)),
         "n_hmm_segments": int(out["segments"].max() + 1) if trip.n_obs else 0,
         "predicted_route_arc_ids": [int(a) for a in route],

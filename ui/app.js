@@ -74,15 +74,18 @@ function row(k, v) { return `<tr><td>${k}</td><td class="num">${v}</td></tr>`; }
 function show(d, rt) {
   const e = d.evaluation || {};
   if (e.available) {
-    $("kpis").innerHTML = `<div class="kpi"><div class="big">${pct(e.observation_top1_accuracy_hmm)}</div><div class="lbl">Observation top-1 accuracy (HMM)</div></div>
-      <div class="kpi"><div class="big">${pct(e.route_f1_hmm)}</div><div class="lbl">Route F1 (length-weighted)</div></div>`;
-    $("metrics").innerHTML = `<tr><th>Metric</th><th style="text-align:right">Classifier only</th><th style="text-align:right">Classifier + HMM</th></tr>` +
-      `<tr><td>Observation top-1 accuracy</td><td class="num">${pct(e.observation_top1_accuracy_classifier_only)}</td><td class="num">${pct(e.observation_top1_accuracy_hmm)}</td></tr>` +
-      `<tr><td>Observation macro-F1 (per arc)</td><td class="num">${pct(e.observation_macro_f1_classifier_only)}</td><td class="num">${pct(e.observation_macro_f1_hmm)}</td></tr>` +
-      `<tr><td>Route continuity</td><td class="num">${pct(e.route_continuity_classifier_only)}</td><td class="num">${pct(e.route_continuity_hmm)}</td></tr>` +
-      `<tr><td>Route F1</td><td class="num">${pct(e.route_f1_classifier_only)}</td><td class="num">${pct(e.route_f1_hmm)}</td></tr>` +
-      `<tr><td>Route precision / recall</td><td class="num">–</td><td class="num">${pct(e.route_precision_hmm)} / ${pct(e.route_recall_hmm)}</td></tr>` +
-      `<tr><td>Scored observations</td><td class="num" colspan="2">${e.n_scored_observations} of ${e.n_observations}</td></tr>`;
+    const S = e.stages, c = S.classifier_only, h = S.hmm, f = S.final;
+    $("kpis").innerHTML = `<div class="kpi"><div class="big">${pct(f.observation_top1_accuracy)}</div><div class="lbl">Observation top-1 accuracy (final)</div></div>
+      <div class="kpi"><div class="big">${pct(e.route_f1)}</div><div class="lbl">Route F1 (length-weighted)</div></div>`;
+    const r3 = (k, a, b, d) => `<tr><td>${k}</td><td class="num">${a}</td><td class="num">${b}</td><td class="num">${d}</td></tr>`;
+    $("metrics").innerHTML = `<tr><th>Metric</th><th style="text-align:right">Classifier only</th><th style="text-align:right">+ HMM/Viterbi</th><th style="text-align:right">+ route re-alignment (final)</th></tr>` +
+      r3("Observation top-1 accuracy", pct(c.observation_top1_accuracy), pct(h.observation_top1_accuracy), pct(f.observation_top1_accuracy)) +
+      r3("Observation macro-F1 (per arc)", pct(c.observation_macro_f1), pct(h.observation_macro_f1), pct(f.observation_macro_f1)) +
+      r3("Route continuity", pct(c.route_continuity), pct(h.route_continuity), pct(f.route_continuity)) +
+      r3("Top-1 over all fixes (incl. unscored)", pct(c.observation_top1_accuracy_all_fixes), pct(h.observation_top1_accuracy_all_fixes), pct(f.observation_top1_accuracy_all_fixes)) +
+      r3("Route F1", pct(e.route_f1_classifier_only), pct(e.route_f1), pct(e.route_f1)) +
+      r3("Route precision / recall", "–", "–", `${pct(e.route_precision)} / ${pct(e.route_recall)}`) +
+      `<tr><td>Scored observations</td><td class="num" colspan="3">${e.n_scored_observations} of ${e.n_observations}</td></tr>`;
   } else {
     $("kpis").innerHTML = "";
     $("metrics").innerHTML = row("Evaluation", e.reason || "not available");

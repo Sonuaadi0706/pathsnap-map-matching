@@ -12,7 +12,7 @@
   "partition": "smoke_partition"
  },
  "00000009": {
-  "seconds": 0.36,
+  "seconds": 0.4,
   "n_observations": 1049,
   "n_matched": 1049,
   "route_arcs": 442,
@@ -22,11 +22,12 @@
   "obs_count_matches_file": true,
   "no_reference_fields": true,
   "evaluation_available": true,
+  "acc_final": 0.9332697807435653,
   "acc_hmm": 0.9227836034318398,
   "acc_cls": 0.8903717826501429
  },
  "00000077": {
-  "seconds": 0.67,
+  "seconds": 0.82,
   "n_observations": 3911,
   "n_matched": 3911,
   "route_arcs": 354,
@@ -36,11 +37,12 @@
   "obs_count_matches_file": true,
   "no_reference_fields": true,
   "evaluation_available": true,
+  "acc_final": 0.9483508054206086,
   "acc_hmm": 0.8954231654308361,
   "acc_cls": 0.8031194068013295
  },
  "99999999": {
-  "seconds": 0.05,
+  "seconds": 0.06,
   "n_observations": 262,
   "n_matched": 162,
   "route_arcs": 71,
@@ -50,21 +52,22 @@
   "obs_count_matches_file": true,
   "no_reference_fields": true,
   "evaluation_available": true,
+  "acc_final": 0.9747899159663865,
   "acc_hmm": 0.9663865546218487,
   "acc_cls": 0.9243697478991597
  },
  "server_log_tail": [
-  "2026-11-18 10:55:34,229 | INFO | POST /predict from 127.0.0.1 -> 200 in 673 ms",
-  "INFO:     127.0.0.1:56930 - \"POST /predict HTTP/1.1\" 200 OK",
-  "2026-11-18 10:55:34,233 | INFO | PREDICT request trip=99999999",
-  "2026-11-18 10:55:34,285 | INFO | PREDICT done trip=99999999 obs=262 route_arcs=71 acc_hmm=0.9664 acc_cls=0.9244 total=0.05s",
-  "2026-11-18 10:55:34,286 | INFO | POST /predict from 127.0.0.1 -> 200 in 54 ms",
-  "INFO:     127.0.0.1:56931 - \"POST /predict HTTP/1.1\" 200 OK",
-  "2026-11-18 10:55:34,288 | INFO | POST /predict from 127.0.0.1 -> 404 in 1 ms",
-  "INFO:     127.0.0.1:56933 - \"POST /predict HTTP/1.1\" 404 Not Found",
+  "2026-11-18 11:17:49,902 | INFO | POST /predict from 127.0.0.1 -> 200 in 814 ms",
+  "INFO:     127.0.0.1:58965 - \"POST /predict HTTP/1.1\" 200 OK",
+  "2026-11-18 11:17:49,907 | INFO | PREDICT request trip=99999999",
+  "2026-11-18 11:17:49,966 | INFO | PREDICT done trip=99999999 obs=262 route_arcs=71 acc_final=0.9748 acc_hmm=0.9664 acc_cls=0.9244 total=0.05s",
+  "2026-11-18 11:17:49,968 | INFO | POST /predict from 127.0.0.1 -> 200 in 62 ms",
+  "INFO:     127.0.0.1:58968 - \"POST /predict HTTP/1.1\" 200 OK",
+  "2026-11-18 11:17:49,971 | INFO | POST /predict from 127.0.0.1 -> 404 in 1 ms",
+  "INFO:     127.0.0.1:58969 - \"POST /predict HTTP/1.1\" 404 Not Found",
   "INFO:     Shutting down",
   "INFO:     Waiting for application shutdown.",
   "INFO:     Application shutdown complete.",
-  "INFO:     Finished server process [96841]"
+  "INFO:     Finished server process [13290]"
  ]
 }

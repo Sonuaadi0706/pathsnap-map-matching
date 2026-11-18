@@ -92,14 +92,16 @@ def eda_map(part, tid):
 
 def prediction_map(part, tid, predictor, detail=False):
     res = predictor.predict_trip(tid, part, use_hmm=True)
-    trip, cls, hmm, route = res["trip"], res["cls_pred"], res["hmm_pred"], res["route"]
+    trip, cls, hmm, route = res["trip"], res["cls_pred"], res["final_pred"], res["route"]
+    vit = res["hmm_pred"]
     m = base_map(trip)
     ref = load_route(tid, part)   # displayed for development trips only
     stats = {}
     if len(ref):
         lab, _, ld = align_route(trip.xy, trip.node_xy, trip.arcs, ref)
         rel = ld <= 60
-        stats = dict(cls_top1=float((cls == lab)[rel].mean()), hmm_top1=float((hmm == lab)[rel].mean()),
+        stats = dict(cls_top1=float((cls == lab)[rel].mean()), viterbi_top1=float((vit == lab)[rel].mean()),
+                     hmm_top1=float((hmm == lab)[rel].mean()),
                      cls_cont=continuity(cls, trip.arcs), hmm_cont=continuity(hmm, trip.arcs),
                      hmm_route_f1=route_overlap(route, ref, res["graph"].alen)["route_f1"],
                      cls_route_f1=route_overlap(collapse(cls), ref, res["graph"].alen)["route_f1"])
@@ -131,7 +133,7 @@ def prediction_map(part, tid, predictor, detail=False):
         m.fit_bounds([[seg_ll[:, 1].min(), seg_ll[:, 0].min()], [seg_ll[:, 1].max(), seg_ll[:, 0].max()]])
         stats["detail_window"] = [i0, i0 + win]
     folium.LayerControl(collapsed=False).add_to(m)
-    txt = (f"<br>top-1: classifier {stats['cls_top1']:.3f} &rarr; HMM {stats['hmm_top1']:.3f}"
+    txt = (f"<br>top-1: classifier {stats['cls_top1']:.3f} &rarr; HMM {stats['viterbi_top1']:.3f} &rarr; final {stats['hmm_top1']:.3f}"
            f"<br>route F1: classifier {stats['cls_route_f1']:.3f} &rarr; HMM {stats['hmm_route_f1']:.3f}") if stats else ""
     m.get_root().html.add_child(legend([("Raw GPS fixes", "#1565c0", 4, "dotted"),
                                         ("Reference route", "#2e7d32", 8, "solid"),
