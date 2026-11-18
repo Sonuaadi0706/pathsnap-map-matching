@@ -57,6 +57,9 @@ python scripts/model_plots.py       # comparison figures + tables
 python scripts/make_maps.py --eda train 00000002
 python scripts/make_maps.py student_test 00000009 00000077
 python scripts/smoke_test.py        # fresh-process end-to-end check
+python scripts/diagrams.py          # pipeline / deployment diagrams
+python scripts/build_report.py      # report/PathSnap_Technical_Report.pdf
+python scripts/deck_data.py && (cd deck && npm install && node build_deck.js)   # deck/PathSnap_Pitch_Deck.pptx
 ```
 
 Seeds are fixed (42); folds are stored in `results/folds.json`.

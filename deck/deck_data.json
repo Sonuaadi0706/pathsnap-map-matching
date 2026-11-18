@@ -1,0 +1,435 @@
+{
+ "team": {},
+ "data": {
+  "train_trips": 80,
+  "test_trips": 10,
+  "train_fixes": 208417,
+  "test_fixes": 19160,
+  "arcs_min": 649,
+  "arcs_max": 307392,
+  "frac_dt1": 0.9921214329169925,
+  "max_gap": 153064.0,
+  "twoway": 0.9505887880248234,
+  "offroute_train": 22337,
+  "miss_test": 0.0007,
+  "miss_train": 0.0088
+ },
+ "baseline": {
+  "test_top1": 0.5450222106088319,
+  "cv_top1": 0.553346750544865,
+  "test_cont": 0.8049544539313219
+ },
+ "models": [
+  {
+   "key": "logreg",
+   "label": "LogReg",
+   "family": "Linear / probabilistic",
+   "cv_f1": 0.8302531638593373,
+   "cv_f1_std": 0.023362906146885742,
+   "cv_top1": 0.8925257912986861,
+   "train_top1": 0.8917921249236447,
+   "test_top1": 0.8853932584269663,
+   "test_f1": 0.803936702596539,
+   "test_ll": 0.40864717960357666,
+   "cont": 0.9361992310838019,
+   "infer_s": 0.005660295486450195,
+   "fit_s": 0.9523639678955078
+  },
+  {
+   "key": "gnb",
+   "label": "Gauss NB",
+   "family": "Probabilistic (generative)",
+   "cv_f1": 0.7664662452915646,
+   "cv_f1_std": 0.027958853716048754,
+   "cv_top1": 0.8493613063220501,
+   "train_top1": 0.8503894989136361,
+   "test_top1": 0.8401358766657957,
+   "test_f1": 0.7438868717151872,
+   "test_ll": 0.8356798887252808,
+   "cont": 0.9405754166847673,
+   "infer_s": 0.01822495460510254,
+   "fit_s": 0.10844111442565918
+  },
+  {
+   "key": "knn",
+   "label": "KNN",
+   "family": "Instance-based",
+   "cv_f1": 0.7897246274567093,
+   "cv_f1_std": 0.029321140296339785,
+   "cv_top1": 0.8744296166944616,
+   "train_top1": 0.89528608683729,
+   "test_top1": 0.8686177162268095,
+   "test_f1": 0.7662096465522407,
+   "test_ll": 0.4787750104828554,
+   "cont": 0.943842069574945,
+   "infer_s": 44.47244906425476,
+   "fit_s": 0.043829917907714844
+  },
+  {
+   "key": "rf",
+   "label": "Rand. Forest",
+   "family": "Ensemble (bagging)",
+   "cv_f1": 0.8592201990023949,
+   "cv_f1_std": 0.02801997660742537,
+   "cv_top1": 0.90166595675122,
+   "train_top1": 0.9728100062754119,
+   "test_top1": 0.9034230467729292,
+   "test_f1": 0.8502394277009184,
+   "test_ll": 0.2651618821183203,
+   "cont": 0.946206642922394,
+   "infer_s": 0.6873869895935059,
+   "fit_s": 109.59411787986755
+  },
+  {
+   "key": "lgbm",
+   "label": "LightGBM",
+   "family": "Boosting",
+   "cv_f1": 0.8682867737982326,
+   "cv_f1_std": 0.0253715999126746,
+   "cv_top1": 0.90387523709006,
+   "train_top1": 0.9596866121467219,
+   "test_top1": 0.9115756467206689,
+   "test_f1": 0.8627312735323762,
+   "test_ll": 0.24641926563560737,
+   "cont": 0.9504148477604627,
+   "infer_s": 2.0320780277252197,
+   "fit_s": 24.264246940612793
+  },
+  {
+   "key": "mlp",
+   "label": "MLP",
+   "family": "Neural network",
+   "cv_f1": 0.8514657895256477,
+   "cv_f1_std": 0.02600993716478288,
+   "cv_top1": 0.8969259351274138,
+   "train_top1": 0.91258525379919,
+   "test_top1": 0.9021688006271231,
+   "test_f1": 0.8372935366602487,
+   "test_ll": 0.28116336464881897,
+   "cont": 0.9452833668791912,
+   "infer_s": 0.038233041763305664,
+   "fit_s": 11.86811089515686
+  }
+ ],
+ "optuna": {
+  "n_trials": 40,
+  "best": {
+   "n_estimators": 400,
+   "learning_rate": 0.03704835800688855,
+   "num_leaves": 39,
+   "min_child_samples": 29,
+   "subsample": 0.5011582138173765,
+   "colsample_bytree": 0.49703041033104195,
+   "reg_lambda": 0.0018572637301708756,
+   "reg_alpha": 0.064742963320139,
+   "subsample_freq": 1
+  },
+  "best_cv": 0.9050927061128086,
+  "untuned_cv_search": 0.9037398854150756,
+  "wall_min": 18.618152515093485,
+  "min": 0.9011876388169071,
+  "max": 0.9050927061128086,
+  "tv": {
+   "lgbm": {
+    "cv_macro_f1": 0.8682867737982326,
+    "cv_top1": 0.90387523709006,
+    "test_top1": 0.9115756467206689,
+    "test_macro_f1": 0.8627312735323762,
+    "test_obs_logloss": 0.24641926563560737,
+    "test_cand_logloss": 0.05273940202315764,
+    "test_continuity": 0.9504148477604627,
+    "infer_time_s": 2.0320780277252197,
+    "fit_time_s": 24.264246940612793
+   },
+   "lgbm_tuned": {
+    "cv_macro_f1": 0.8671853732952035,
+    "cv_top1": 0.9044144821131125,
+    "test_top1": 0.9105304415991639,
+    "test_macro_f1": 0.862894443291383,
+    "test_obs_logloss": 0.2522276251354006,
+    "test_cand_logloss": 0.053464373104892014,
+    "test_continuity": 0.9516717214204947,
+    "infer_time_s": 0.9581279754638672,
+    "fit_time_s": 6.595064163208008
+   }
+  }
+ },
+ "hmm": {
+  "sel": "lgbm_tuned",
+  "params": {
+   "beta": 20.0,
+   "w_emit": 0.25,
+   "gap_s": 60.0,
+   "gap_m": 1500.0,
+   "v_max": 60.0,
+   "back_tol_m": 15.0,
+   "back_pen_m": 60.0,
+   "sp_limit_m": 3000.0
+  },
+  "rows": {
+   "baseline": {
+    "cls_top1": 0.5450222106088319,
+    "hmm_top1": 0.9191533838515809,
+    "cls_continuity": 0.8049544539313219,
+    "hmm_continuity": 0.9776261199332408,
+    "cls_route_f1": 0.6715574901732968,
+    "hmm_route_f1": 0.9858531620809062,
+    "cls_route_precision": 0.5327511726713443,
+    "hmm_route_precision": 0.9748376517576709,
+    "cls_route_recall": 0.9264104598122433,
+    "hmm_route_recall": 0.9973509671665031,
+    "trips_hmm_hurt_top1": 0.0,
+    "trips_hmm_hurt_route_f1": 0.0,
+    "mean_decode_time_s": 0.23820383548736573
+   },
+   "gnb": {
+    "cls_top1": 0.8401358766657957,
+    "hmm_top1": 0.9263130389338908,
+    "cls_continuity": 0.9405754166847673,
+    "hmm_continuity": 0.9778170327504156,
+    "cls_route_f1": 0.8816859116697989,
+    "hmm_route_f1": 0.9822065440912532,
+    "cls_route_precision": 0.8104875216714802,
+    "hmm_route_precision": 0.969439309846355,
+    "cls_route_recall": 0.9741402656165012,
+    "hmm_route_recall": 0.9957211527993378,
+    "trips_hmm_hurt_top1": 0.0,
+    "trips_hmm_hurt_route_f1": 0.0,
+    "mean_decode_time_s": 0.23426294326782227
+   },
+   "knn": {
+    "cls_top1": 0.8686177162268095,
+    "hmm_top1": 0.9253723543245362,
+    "cls_continuity": 0.943842069574945,
+    "hmm_continuity": 0.9789107987538074,
+    "cls_route_f1": 0.9354032621374021,
+    "hmm_route_f1": 0.9846945164951137,
+    "cls_route_precision": 0.8993834829299624,
+    "hmm_route_precision": 0.9751753654056421,
+    "cls_route_recall": 0.9765898334524621,
+    "hmm_route_recall": 0.9945638003343491,
+    "trips_hmm_hurt_top1": 0.0,
+    "trips_hmm_hurt_route_f1": 0.0,
+    "mean_decode_time_s": 0.22375290393829345
+   },
+   "lgbm": {
+    "cls_top1": 0.9115756467206689,
+    "hmm_top1": 0.9525476874836687,
+    "cls_continuity": 0.9504148477604627,
+    "hmm_continuity": 0.9800272448209457,
+    "cls_route_f1": 0.9526746948559068,
+    "hmm_route_f1": 0.989323668132031,
+    "cls_route_precision": 0.928556773949816,
+    "hmm_route_precision": 0.9821002879252388,
+    "cls_route_recall": 0.9793342088486428,
+    "hmm_route_recall": 0.9967514660345225,
+    "trips_hmm_hurt_top1": 0.0,
+    "trips_hmm_hurt_route_f1": 0.0,
+    "mean_decode_time_s": 0.2247870683670044
+   },
+   "lgbm_tuned": {
+    "cls_top1": 0.9105304415991639,
+    "hmm_top1": 0.9523386464593676,
+    "cls_continuity": 0.9516717214204947,
+    "hmm_continuity": 0.979917432395608,
+    "cls_route_f1": 0.9530832356878068,
+    "hmm_route_f1": 0.9895462940169919,
+    "cls_route_precision": 0.9296913111212864,
+    "hmm_route_precision": 0.9826255252098763,
+    "cls_route_recall": 0.9790941821756534,
+    "hmm_route_recall": 0.9966610752210482,
+    "trips_hmm_hurt_top1": 0.0,
+    "trips_hmm_hurt_route_f1": 0.0,
+    "mean_decode_time_s": 0.22545466423034669
+   },
+   "logreg": {
+    "cls_top1": 0.8853932584269663,
+    "hmm_top1": 0.9313300235171152,
+    "cls_continuity": 0.9361992310838019,
+    "hmm_continuity": 0.9779446634300397,
+    "cls_route_f1": 0.9363831674617209,
+    "hmm_route_f1": 0.9876359213830261,
+    "cls_route_precision": 0.902780049067793,
+    "hmm_route_precision": 0.9787505619986977,
+    "cls_route_recall": 0.9748471270798941,
+    "hmm_route_recall": 0.996847849122607,
+    "trips_hmm_hurt_top1": 0.0,
+    "trips_hmm_hurt_route_f1": 0.0,
+    "mean_decode_time_s": 0.2296839714050293
+   },
+   "mlp": {
+    "cls_top1": 0.9021688006271231,
+    "hmm_top1": 0.9454925529135093,
+    "cls_continuity": 0.9452833668791912,
+    "hmm_continuity": 0.9788824830251276,
+    "cls_route_f1": 0.9452495998014259,
+    "hmm_route_f1": 0.989895545435678,
+    "cls_route_precision": 0.9159792708748944,
+    "hmm_route_precision": 0.982781433787512,
+    "cls_route_recall": 0.9783029876165316,
+    "hmm_route_recall": 0.9972146294263045,
+    "trips_hmm_hurt_top1": 0.0,
+    "trips_hmm_hurt_route_f1": 0.0,
+    "mean_decode_time_s": 0.22430088520050048
+   },
+   "rf": {
+    "cls_top1": 0.9034230467729292,
+    "hmm_top1": 0.9479487849490462,
+    "cls_continuity": 0.946206642922394,
+    "hmm_continuity": 0.9795144517349549,
+    "cls_route_f1": 0.9485866988387208,
+    "hmm_route_f1": 0.9895776392177238,
+    "cls_route_precision": 0.9211644456134778,
+    "hmm_route_precision": 0.9826011079258887,
+    "cls_route_recall": 0.9791379179982265,
+    "hmm_route_recall": 0.9967514660345225,
+    "trips_hmm_hurt_top1": 0.0,
+    "trips_hmm_hurt_route_f1": 0.0,
+    "mean_decode_time_s": 0.2309257745742798
+   }
+  },
+  "pertrip": [
+   {
+    "trip": "00000000",
+    "cls_top1": 0.9532560926887734,
+    "hmm_top1": 0.9764282860567319,
+    "cls_route_f1": 0.9846395484529595,
+    "hmm_route_f1": 0.9975254981249861
+   },
+   {
+    "trip": "00000007",
+    "cls_top1": 0.9630723781388478,
+    "hmm_top1": 0.9734121122599705,
+    "cls_route_f1": 0.9891586271017002,
+    "hmm_route_f1": 0.9911194315291801
+   },
+   {
+    "trip": "00000009",
+    "cls_top1": 0.8903717826501429,
+    "hmm_top1": 0.9227836034318398,
+    "cls_route_f1": 0.9152570848885606,
+    "hmm_route_f1": 0.9743346524556693
+   },
+   {
+    "trip": "00000040",
+    "cls_top1": 0.9585976627712854,
+    "hmm_top1": 0.9799666110183639,
+    "cls_route_f1": 0.9816684445310927,
+    "hmm_route_f1": 0.9995776636126447
+   },
+   {
+    "trip": "00000052",
+    "cls_top1": 0.9770992366412213,
+    "hmm_top1": 0.9961832061068703,
+    "cls_route_f1": 0.972985477382899,
+    "hmm_route_f1": 0.9984314001637546
+   },
+   {
+    "trip": "00000056",
+    "cls_top1": 0.9321128909229596,
+    "hmm_top1": 0.9702517162471396,
+    "cls_route_f1": 0.9362661373300264,
+    "hmm_route_f1": 0.9801009367764056
+   },
+   {
+    "trip": "00000065",
+    "cls_top1": 0.8763020833333334,
+    "hmm_top1": 0.90625,
+    "cls_route_f1": 0.9575674718550227,
+    "hmm_route_f1": 0.9911385735425262
+   },
+   {
+    "trip": "00000076",
+    "cls_top1": 0.9407806191117093,
+    "hmm_top1": 0.9831763122476447,
+    "cls_route_f1": 0.9455885132006706,
+    "hmm_route_f1": 0.9860069221609045
+   },
+   {
+    "trip": "00000077",
+    "cls_top1": 0.8031194068013295,
+    "hmm_top1": 0.8954231654308361,
+    "cls_route_f1": 0.894389109314149,
+    "hmm_route_f1": 0.9907527667301187
+   },
+   {
+    "trip": "00000091",
+    "cls_top1": 0.9084668192219679,
+    "hmm_top1": 0.9405034324942791,
+    "cls_route_f1": 0.9533119428209882,
+    "hmm_route_f1": 0.9864750950737285
+   }
+  ]
+ },
+ "features": [
+  [
+   "d_minus_min",
+   0.2381031410184395
+  ],
+  [
+   "cos_head_win",
+   0.1766849956484934
+  ],
+  [
+   "d_ratio",
+   0.12997656946700495
+  ],
+  [
+   "d_rank",
+   0.12317587499309461
+  ],
+  [
+   "t_outside",
+   0.055244847067289896
+  ],
+  [
+   "cos_head",
+   0.04900184479446679
+  ],
+  [
+   "cos_head_x_speed",
+   0.04580342478788223
+  ],
+  [
+   "abs_head",
+   0.02655535057691258
+  ]
+ ],
+ "smoke": {
+  "00000009": {
+   "seconds": 0.36,
+   "n_observations": 1049,
+   "n_matched": 1049,
+   "route_arcs": 442,
+   "route_ids_valid": true,
+   "route_consecutive_connected": 1.0,
+   "hmm_segments": 1,
+   "obs_count_matches_file": true,
+   "no_reference_fields": true,
+   "evaluation_available": true,
+   "acc_hmm": 0.9227836034318398,
+   "acc_cls": 0.8903717826501429
+  },
+  "00000077": {
+   "seconds": 0.67,
+   "n_observations": 3911,
+   "n_matched": 3911,
+   "route_arcs": 354,
+   "route_ids_valid": true,
+   "route_consecutive_connected": 1.0,
+   "hmm_segments": 1,
+   "obs_count_matches_file": true,
+   "no_reference_fields": true,
+   "evaluation_available": true,
+   "acc_hmm": 0.8954231654308361,
+   "acc_cls": 0.8031194068013295
+  },
+  "checks": {
+   "trips_listed": true,
+   "missing_candidates_handled": true,
+   "all_ids_valid": true,
+   "no_reference_leak": true,
+   "unknown_trip_404": true
+  }
+ }
+}

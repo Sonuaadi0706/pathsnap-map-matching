@@ -3,7 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 const pptxgen = require("pptxgenjs");
-const { applyTheme } = require(process.env.PPTX_SKILL + "/scripts/apply_theme.js");
+// optional: writes the monochrome palette + name into the deck theme (helper from the pptx tooling);
+// the deck uses explicit hex colours, so it renders identically without it.
+let applyTheme = null;
+try { if (process.env.PPTX_SKILL) ({ applyTheme } = require(process.env.PPTX_SKILL + "/scripts/apply_theme.js")); } catch (e) { applyTheme = null; }
 
 const D = JSON.parse(fs.readFileSync(path.join(__dirname, "deck_data.json"), "utf8"));
 const FIG = path.join(__dirname, "..", "figures");
@@ -16,6 +19,7 @@ const THEME = {
 };
 const HEX = { ink: "111111", mid: "595959", light: "A6A6A6", pale: "F2F2F2", grid: "E3E3E3" };
 const f3 = (x) => Number(x).toFixed(3);
+const f4 = (x) => Number(x).toFixed(4);
 const pct = (x) => (100 * x).toFixed(1) + "%";
 
 function pngSize(p) {
@@ -35,7 +39,7 @@ const pres = new pptxgen();
 pres.layout = "LAYOUT_WIDE"; // 13.33 x 7.5
 pres.title = "PathSnap pitch deck";
 pres.theme = { headFontFace: THEME.headFontFace, bodyFontFace: THEME.bodyFontFace };
-const C = pres.SchemeColor;
+const C = { text1: "000000", background1: "FFFFFF", accent2: "595959", accent3: "8C8C8C", accent4: "BFBFBF" };
 
 pres.defineSlideMaster({
   title: "DARK", background: { color: C.text1 },
@@ -55,8 +59,8 @@ pres.defineSlideMaster({
   slideNumber: { x: 12.2, y: 7.0, w: 0.6, h: 0.3, fontSize: 10, color: "8C8C8C" },
 });
 
-function stat(slide, x, y, w, big, label, dark = false, name = "stat") {
-  slide.addText(big, { x, y, w, h: 0.9, fontSize: 40, bold: true, color: dark ? C.background1 : C.text1, margin: 0,
+function stat(slide, x, y, w, big, label, dark = false, name = "stat", size = 40) {
+  slide.addText(big, { x, y, w, h: 0.9, fontSize: size, bold: true, color: dark ? C.background1 : C.text1, margin: 0,
     isTextBox: true, objectName: name + "_value" });
   slide.addText(label, { x, y: y + 0.9, w, h: 0.75, fontSize: 13, color: dark ? C.accent4 : C.accent2, margin: 0,
     valign: "top", isTextBox: true, objectName: name + "_label" });
@@ -91,17 +95,17 @@ s.addText("The nearest road is wrong almost half the time", { placeholder: "titl
 stat(s, 0.6, 1.55, 3.6, pct(D.baseline.test_top1), "of student-test fixes lie on their nearest arc (geometric baseline)", false, "s1");
 stat(s, 0.6, 3.35, 3.6, pct(D.data.twoway), "of arcs (median trip) are one direction of a two-way street, at identical distance", false, "s2");
 stat(s, 0.6, 5.15, 3.6, pct(D.baseline.test_cont), "route continuity of nearest-arc matching: the path jumps", false, "s3");
-fitImage(s, "screenshot_map_test_zoom.png", 4.6, 1.4, 8.1, 5.45, "map_zoom");
+fitImage(s, "bw_screenshot_map_test_zoom.png", 4.6, 1.4, 8.1, 5.45, "map_zoom");
 s.addNotes(`Nearest-segment matching gets ${pct(D.baseline.test_top1)} of fixes right. The main reason is two-way streets: both directions are separate arcs at the same distance, so only motion (heading) can tell them apart. Parallel roads and urban multipath add the rest. Right: our Folium map of the hardest test trip.`);
 
 // 3 ---------------------------------------------------------------- data
 pres.addSection({ title: "Data" });
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Data" });
 s.addText("90 trips, worldwide, every trip with its own road graph", { placeholder: "title" });
-stat(s, 0.6, 1.5, 2.9, `${D.data.train_trips} / ${D.data.test_trips} / 10`, "train / student-test / evaluator trips", false, "d1");
-stat(s, 3.6, 1.5, 2.9, (D.data.train_fixes / 1000).toFixed(0) + "k", "training GPS fixes (" + (D.data.test_fixes / 1000).toFixed(1) + "k test)", false, "d2");
-stat(s, 6.6, 1.5, 2.9, (D.data.arcs_min / 1000).toFixed(1) + "k-" + (D.data.arcs_max / 1000).toFixed(0) + "k", "directed arcs per trip graph", false, "d3");
-stat(s, 9.6, 1.5, 3.1, pct(D.data.frac_dt1), "of steps at 1 Hz (median trip), but gaps up to " + (D.data.max_gap / 3600).toFixed(0) + " h", false, "d4");
+stat(s, 0.6, 1.5, 2.9, `${D.data.train_trips} / ${D.data.test_trips} / 10`, "train / student-test / evaluator trips", false, "d1", 32);
+stat(s, 3.6, 1.5, 2.9, (D.data.train_fixes / 1000).toFixed(0) + "k", "training GPS fixes (" + (D.data.test_fixes / 1000).toFixed(1) + "k test)", false, "d2", 32);
+stat(s, 6.6, 1.5, 2.9, (D.data.arcs_min / 1000).toFixed(1) + "k-" + (D.data.arcs_max / 1000).toFixed(0) + "k", "directed arcs per trip graph", false, "d3", 32);
+stat(s, 9.6, 1.5, 3.1, pct(D.data.frac_dt1), "of steps at 1 Hz (median trip), but gaps up to " + (D.data.max_gap / 3600).toFixed(0) + " h", false, "d4", 32);
 fitImage(s, "eda_trajectories.png", 0.6, 3.3, 12.1, 3.6, "trajectories");
 s.addNotes(`No missing values or duplicate timestamps. Irregularity comes from time gaps, degenerate arcs and reference routes that stop before the track ends: ${D.data.offroute_train.toLocaleString()} training fixes are more than 60 m from the aligned route and are excluded from scoring. Each trip is projected to local metres around its own centroid.`);
 
@@ -155,7 +159,7 @@ s.addNotes(`Same candidates, labels and folds for every model. LightGBM has the 
 
 // 7 ---------------------------------------------------------------- generalisation
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Models" });
-s.addText("Trees fit training trips closely; boosting still generalises best", { placeholder: "title" });
+s.addText("Trees fit training trips; boosting generalises best", { placeholder: "title" });
 s.addChart(pres.charts.BAR, [
   { name: "training folds", labels: models.map((m) => m.label), values: models.map((m) => m.train_top1) },
   { name: "validation folds", labels: models.map((m) => m.label), values: models.map((m) => m.cv_top1) },
@@ -173,12 +177,12 @@ s.addNotes("Over/under-fitting evidence from the same CV folds. Epoch-wise curve
 // 8 ---------------------------------------------------------------- bayesian
 pres.addSection({ title: "Tuning & decoding" });
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Tuning & decoding" });
-s.addText("Bayesian search: a flat optimum, a small real gain", { placeholder: "title" });
+s.addText("Bayesian search: a flat optimum, same accuracy, lighter model", { placeholder: "title" });
 fitImage(s, "optuna_history.png", 0.6, 1.4, 7.4, 5.3, "optuna_history");
 const tu = D.optuna.tv.lgbm, tt = D.optuna.tv.lgbm_tuned;
 stat(s, 8.4, 1.5, 4.3, String(D.optuna.n_trials), "Optuna TPE trials, 5-fold trip-grouped CV each, " + D.optuna.wall_min.toFixed(0) + " min", false, "o1");
-stat(s, 8.4, 3.3, 4.3, `${f3(tu.cv_top1)} → ${f3(tt.cv_top1)}`, "CV top-1, untuned → tuned (same folds)", false, "o2");
-stat(s, 8.4, 5.1, 4.3, `${f3(tu.test_top1)} → ${f3(tt.test_top1)}`, "student-test top-1, untuned → tuned", false, "o3");
+stat(s, 8.4, 3.3, 4.3, `${f4(tu.cv_top1)} → ${f4(tt.cv_top1)}`, "CV top-1, untuned → tuned (same folds); test is a tie", false, "o2", 34);
+stat(s, 8.4, 5.1, 4.3, `${f4(tu.test_top1)} → ${f4(tt.test_top1)}`, "student-test top-1, untuned → tuned; tuned overfits less and scores 2x faster", false, "o3", 34);
 s.addNotes(`Search space: trees, learning rate, leaves, min child samples, bagging fractions, L1/L2. Objective: mean CV top-1 on the 80 training trips only. Every trial lies between ${f3(D.optuna.min)} and ${f3(D.optuna.max)}, so the features, not the hyperparameters, limit accuracy. The gain is smaller than the fold-to-fold variation; we report it as small.`);
 
 // 9 ---------------------------------------------------------------- HMM
@@ -199,7 +203,8 @@ s.addNotes(`States are candidate arcs; emissions are the renormalised classifier
 // 10 --------------------------------------------------------------- map
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Tuning & decoding" });
 s.addText("Folium: prediction against reference on the real map", { placeholder: "title" });
-fitImage(s, "screenshot_map_test_full.png", 0.6, 1.3, 12.1, 5.55, "map_full");
+s.addText("Interactive maps are colour-coded (maps/*.html); shown here in greyscale for print.", { x: 0.6, y: 6.62, w: 12.1, h: 0.35, fontSize: 11, color: C.accent2, isTextBox: true, objectName: "map_note" });
+fitImage(s, "bw_screenshot_map_test_full.png", 0.6, 1.3, 12.1, 5.25, "map_full");
 s.addNotes("Generated by scripts/make_maps.py from the same predictor the API uses. Layers: road network, raw GPS, reference route (development trips only), classifier-only, HMM route and wrongly matched fixes, with layer control and legend.");
 
 // 11 --------------------------------------------------------------- demo
@@ -213,7 +218,7 @@ bullets(s, [
   "Evaluation runs afterwards; only scores reach the UI",
   "Every request is logged on laptop 1",
 ], 0.6, 4.0, 6.0, 2.9, 15, "demo_notes");
-fitImage(s, "screenshot_ui.png", 6.9, 1.35, 5.8, 5.5, "ui");
+fitImage(s, "bw_screenshot_ui.png", 6.9, 1.35, 5.8, 5.5, "ui");
 s.addNotes(`End-to-end latency measured over HTTP in a fresh server: ${D.smoke["00000009"].seconds} s for trip 00000009 (${D.smoke["00000009"].n_observations} fixes) and ${D.smoke["00000077"].seconds} s for 00000077 (${D.smoke["00000077"].n_observations} fixes). The screenshot is from a local run; the two-laptop screenshots are captured at the live evaluation.`);
 
 // 12 --------------------------------------------------------------- result
@@ -247,6 +252,6 @@ bullets(s, [
 s.addNotes("AI assistance (Claude) was used for coding and drafting under the team's direction; all numbers come from executed scripts.");
 
 pres.writeFile({ fileName: OUT }).then(async () => {
-  await applyTheme(OUT, THEME);
-  console.log("written", OUT);
+  if (applyTheme) await applyTheme(OUT, THEME);
+  console.log("written", OUT, applyTheme ? "(theme applied)" : "(default theme)");
 });
