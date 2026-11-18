@@ -52,6 +52,7 @@ d = {
            "test": fs["student_test"]["final_decoder"], "train": fs["train"]["final_decoder"],
            "decoder_adopted": fs["adopted_tuned_decoder"], "heldout": fs["heldout_trips"],
            "val": val,
+           "six_v2": {m: {"cv_top1": J(f"model_{m}_v2feat.json")["cv_mean"]["obs_top1"], "cv_top1_v1": M[m]["cv_mean"]["obs_top1"]} for m in MODELS},
            "pertrip": [{"trip": r.trip, "cls": r.cls_top1, "hmm": r.hmm_top1, "final": r.final_top1,
                         "r1_final": float(r1t.loc[r.trip, "realign_top1"])} for r in ft.itertuples()]},
     "team": team,

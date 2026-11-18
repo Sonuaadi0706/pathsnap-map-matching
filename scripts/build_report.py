@@ -68,6 +68,7 @@ PROMO = pd.read_csv(RES / "optuna_v2_promotion.csv")
 FINAL = json.load(open(ROOT / "models/final_config.json"))
 assert not FS["adopted_tuned_decoder"] and not FS["grid2"]["adopted"] and FS["selected_decoder"] == "round1_decoder"
 BR = J("bridge_eval.json")
+MV2 = {m: J(f"model_{m}_v2feat.json") for m in MODELS}
 assert BR["adopted"] == FS["bridge_adopted"] == FINAL["hmm_params"]["bridge"]
 assert CHOICE["selected"] == "lgbm_v2_untuned"
 FTEST = pd.read_csv(RES / "final_test.csv", dtype={"trip": str})
@@ -648,6 +649,40 @@ P(f"<b>Did the second search help?</b> CV top-1 {f4(du_['obs_top1'])} (untuned) 
   f"{M2['student_test']['obs_top1'] - M['lgbm_tuned']['student_test']['obs_top1']:+.4f} student-test top-1, and lowers student-test "
   f"log loss from {f3(M['lgbm_tuned']['student_test']['obs_logloss'])} to {f3(M2['student_test']['obs_logloss'])}. Its "
   "train-validation gap is larger than in round 1 (more capacity is used), but validation accuracy is higher on every fold.")
+P("<b>(e) Does the model choice survive the new features?</b> The six-family comparison of Section 3 used the round-1 table "
+  "(28 features, K=12). To check that selecting LightGBM was not an artefact of that table, all six families were re-trained "
+  "with exactly the same protocol and configurations on the round-2 table (46 features, K=24; "
+  "<font face='Courier'>scripts/train_models.py &lt;model&gt; --fs v2</font>, results/model_*_v2feat.json):")
+b6 = [["Model (same configuration as Section 3)", "CV macro-F1: 28 feat. to 46 feat.", "CV top-1: 28 feat. to 46 feat.", "Test top-1: 28 to 46",
+       "Test macro-F1 (46)", "Test log loss (46)", "Train-val gap (46)", "Score time (46)"]]
+for m in MODELS:
+    a_, b_ = M[m], MV2[m]
+    b6.append([NAMES[m], f"{a_['cv_mean']['obs_macro_f1_trip']:.3f} to {b_['cv_mean']['obs_macro_f1_trip']:.3f}",
+               f"{a_['cv_mean']['obs_top1']:.3f} to {b_['cv_mean']['obs_top1']:.3f}",
+               f"{a_['student_test']['obs_top1']:.3f} to {b_['student_test']['obs_top1']:.3f}",
+               f3(b_["student_test"]["obs_macro_f1_trip"]), f3(b_["student_test"]["obs_logloss"]),
+               f"{b_['cv_mean']['train_obs_top1'] - b_['cv_mean']['obs_top1']:+.3f}", f"{b_['student_test']['infer_time_s']:.2f} s"])
+b6.append(["LightGBM LambdaRank (deployed scorer)", f"- to {M2['cv_mean']['obs_macro_f1_trip']:.3f}", f"- to {M2['cv_mean']['obs_top1']:.3f}",
+           f"- to {M2['student_test']['obs_top1']:.3f}", f3(M2["student_test"]["obs_macro_f1_trip"]), f3(M2["student_test"]["obs_logloss"]),
+           f"{M2['cv_mean']['train_obs_top1'] - M2['cv_mean']['obs_top1']:+.3f}", f"{M2['student_test']['infer_time_s']:.2f} s"])
+table(b6, widths=[4.0 * cm, 2.5 * cm, 2.4 * cm, 2.2 * cm, 1.6 * cm, 1.5 * cm, 1.6 * cm, 1.6 * cm])
+bestv2 = max(MODELS, key=lambda m: MV2[m]["cv_mean"]["obs_macro_f1_trip"])
+bestv2t = max(MODELS, key=lambda m: MV2[m]["cv_mean"]["obs_top1"])
+gain = {m: MV2[m]["cv_mean"]["obs_top1"] - M[m]["cv_mean"]["obs_top1"] for m in MODELS}
+up = [m for m in MODELS if gain[m] > 0.001]
+down = [m for m in MODELS if gain[m] < -0.001]
+P("Table 7e. All six families on the round-2 candidate/feature table, same folds, labels, metrics and model configurations "
+  "as Table 4 (no re-tuning). The last row is the deployed ranking scorer for reference.", CAP)
+P(f"Among the six binary models, {NAMES[bestv2]} has the best CV macro-F1 on the new table and {NAMES[bestv2t]} the best CV top-1"
+  + (", so the boosting family remains the right choice" if (bestv2 in ("lgbm",) or bestv2t in ("lgbm",)) else
+     "; LightGBM is no longer the best binary model on this table, which we report as is")
+  + f"; the deployed LambdaRank scorer ({M2['cv_mean']['obs_top1']:.3f} CV top-1) is "
+  + ("above" if M2["cv_mean"]["obs_top1"] > max(MV2[m]["cv_mean"]["obs_top1"] for m in MODELS) else "not above")
+  + " every binary model. The new features raise CV top-1 for "
+  + (", ".join(NAMES[m] for m in up) if up else "none of the families")
+  + (" and lower it for " + ", ".join(NAMES[m] for m in down) if down else "")
+  + ". Models that weight all standardised features equally or assume independence gain least from 18 additional, partly "
+  "redundant features, while tree ensembles can use them selectively.")
 fig("optuna_v2_history.png", "Figure 20b. Round-2 Optuna optimisation history.", width=W * 0.8)
 story.append(PageBreak())
 

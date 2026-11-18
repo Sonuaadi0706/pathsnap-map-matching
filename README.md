@@ -23,6 +23,8 @@ trip ID and shows the predicted route and scores.
 * Trip-bootstrap 95% interval for the deployed top-1: [0.967, 0.992] on student-test;
   round 2 minus round 1: +0.0061 [+0.0030, +0.0083] on student-test and
   +0.0079 [+0.0031, +0.0147] on the 80 training trips.
+* All six families re-trained on the round-2 table (`results/model_*_v2feat.json`): LightGBM remains the best binary model; the
+  deployed LambdaRank scorer is above all of them; Naive Bayes and KNN get worse with the extra features.
 * What did **not** help (kept on record): a second Bayesian search over LightGBM hyperparameters tied the existing ones; two
   Bayesian searches over eight decoder parameters improved their tuning trips but not held-out training trips and were not adopted.
 * Labels are derived by aligning fixes to the supplied route and carry some noise (1.6% of moving fixes are
@@ -80,6 +82,7 @@ python scripts/error_analysis.py round1   # round-1 system: residual errors, lab
 python scripts/build_dataset.py --v2          # candidates K=24 + 46 features -> cache_v2/
 python scripts/tune_v2.py                     # candidate set / features / objective variants on the same folds
 python scripts/train_final_v2.py lgbm_v2_untuned lambdarank 3 base     # round-2 scorer with round-1 hyperparameters
+for m in logreg gnb knn rf lgbm mlp; do python scripts/train_models.py $m --fs v2; done   # all six families on the 46-feature table
 python scripts/bayes_opt_v2.py lambdarank 40 1260                      # second Bayesian search (TPE)
 python scripts/promote_v2.py                  # re-score its top-5 trials at full fidelity
 python scripts/train_final_v2.py lgbm_v2 lambdarank 3 promoted && python scripts/select_final_v2.py
