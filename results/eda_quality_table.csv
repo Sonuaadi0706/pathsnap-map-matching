@@ -1,0 +1,14 @@
+check,train,student_test
+trips,80.0,10.0
+GPS observations,208417.0,19160.0
+NaN values in .track / .nodes,0.0,0.0
+non-increasing timestamps,0.0,0.0
+fraction of 1 s steps (median trip),0.9914,0.9993
+trips with a gap > 30 s,28.0,2.0
+max single gap (s),153064.0,210.0
+isolated nodes,0.0,0.0
+self-loop arcs,22.0,2.0
+zero-length arcs,100.0,6.0
+route arcs head->tail continuous,0.9993,0.9997
+observations flagged off-route (>60 m),22337.0,25.0
+candidate miss rate (reliable obs),0.0088,0.0007

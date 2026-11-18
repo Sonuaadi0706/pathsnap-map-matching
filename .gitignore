@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+cache/
+results/*.pkl
+!results/optuna_study.pkl
+logs/*.log
+!logs/api_requests_demo.log
+# raw data is distributed by the organisers -- never commit it (and never evaluator data)
+data/
+Student folder/
+*.track
+*.nodes
+*.arcs
+*.route
+.env
+deck/node_modules/

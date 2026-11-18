@@ -1,0 +1,5 @@
+{
+ "model": "lgbm",
+ "hmm_params": {"beta": 20.0, "w_emit": 1.0},
+ "note": "provisional baseline config; replaced after Bayesian optimisation + decoder grid"
+}
