@@ -44,6 +44,11 @@ class Predictor:
         trip = load_trip(trip_id, partition, data_root, with_route=False)
         timings["load_s"] = time.time() - t0
         t0 = time.time()
+        if trip.n_obs == 0:
+            empty = np.zeros(0, dtype=np.int64)
+            timings["total_s"] = timings["load_s"]
+            return dict(trip=trip, cands=None, cls_pred=empty, hmm_pred=empty, final_pred=empty, segments=empty,
+                        route=empty, graph=None, fill_failures=0, timings=timings)
         cands = build_candidates(trip, v2=True, **V2) if self.v2 else build_candidates(trip)
         timings["candidates_features_s"] = time.time() - t0
         t0 = time.time()
@@ -55,7 +60,11 @@ class Predictor:
             best = cands.loc[cands.groupby("obs").pn.idxmax()]
             cls[best.obs.to_numpy()] = best.arc.to_numpy()
         out = dict(trip=trip, cands=cands, cls_pred=cls, timings=timings)
-        if use_hmm:
+        if use_hmm and len(cands) == 0:      # no candidate arc for any fix: nothing can be matched
+            none = np.full(n, -1, dtype=np.int64)
+            out.update(hmm_pred=none, final_pred=none.copy(), segments=none.copy(), route=np.zeros(0, dtype=np.int64),
+                       graph=None, fill_failures=0)
+        elif use_hmm:
             t0 = time.time()
             pred, seg, g = decode(trip, cands, self.hmm)
             route, nfail = reconstruct_route(pred, seg, g)

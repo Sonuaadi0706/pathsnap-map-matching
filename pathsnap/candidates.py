@@ -47,6 +47,9 @@ class ArcIndex:
         amin, amax = np.minimum(a, b), np.maximum(a, b)
         keep = np.where((amax[:, 0] >= lo[0]) & (amin[:, 0] <= hi[0]) &
                         (amax[:, 1] >= lo[1]) & (amin[:, 1] <= hi[1]))[0]
+        if len(keep) == 0:          # the track is nowhere near the supplied road network
+            self.arc_rep, self.tree = np.zeros(0, dtype=np.int64), None
+            return
         L = np.linalg.norm(b[keep] - a[keep], axis=1)
         ns = np.maximum(1, np.ceil(L / SAMPLE_STEP).astype(int)) + 1
         arc_rep = np.repeat(keep, ns)
@@ -56,10 +59,13 @@ class ArcIndex:
         self.tree = cKDTree(pts)
 
     def query(self, xy, radius=RADIUS_M, k_samples=96):
+        if self.tree is None or len(xy) == 0:
+            return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64)
+        k_samples = min(k_samples, len(self.arc_rep))
         dd, ii = self.tree.query(xy, k=k_samples, distance_upper_bound=radius + SAMPLE_STEP,
                                  workers=2)
         obs = np.repeat(np.arange(len(xy)), k_samples)
-        ii = ii.ravel()
+        ii = np.asarray(ii).reshape(len(xy), -1).ravel()
         ok = ii < len(self.arc_rep)
         df = pd.DataFrame({"obs": obs[ok], "arc": self.arc_rep[ii[ok]]}).drop_duplicates()
         return df["obs"].to_numpy(), df["arc"].to_numpy()
@@ -87,6 +93,11 @@ def build_candidates(trip, radius=RADIUS_M, max_k=MAX_K, index=None, k_samples=9
     df = pd.DataFrame({"obs": obs, "arc": arc, "d": d, "t_proj": tc,
                        "t_outside": np.abs(traw - tc)})
     df = df[df.d <= radius]
+    if len(df) == 0:                # no candidate arc for any fix: empty, correctly typed table
+        cols = ["trip", "obs", "arc"] + (FEATURES_V2 if v2 else FEATURES)
+        out = pd.DataFrame({c: np.zeros(0, dtype=(object if c == "trip" else np.int64 if c in ("obs", "arc") else np.float32))
+                            for c in cols})
+        return out
     df = df.sort_values(["obs", "d"], kind="mergesort")
     df["d_rank"] = df.groupby("obs").cumcount()
     df = df[df.d_rank < max_k].reset_index(drop=True)

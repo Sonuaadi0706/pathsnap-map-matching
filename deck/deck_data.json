@@ -330,7 +330,9 @@
    }
   ]
  },
- "team": {},
+ "team": {
+  "repo_url": "https://github.com/Sonuaadi0706/pathsnap-map-matching"
+ },
  "final": {
   "test": {
    "cls": {
@@ -871,7 +873,7 @@
  ],
  "smoke": {
   "00000009": {
-   "seconds": 0.72,
+   "seconds": 0.55,
    "n_observations": 1049,
    "n_matched": 1049,
    "route_arcs": 435,
@@ -886,7 +888,7 @@
    "acc_cls": 0.9056244041944709
   },
   "00000077": {
-   "seconds": 1.72,
+   "seconds": 1.17,
    "n_observations": 3911,
    "n_matched": 3911,
    "route_arcs": 312,

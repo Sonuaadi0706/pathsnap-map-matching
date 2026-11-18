@@ -37,8 +37,8 @@ Full analysis: `report/PathSnap_Technical_Report.pdf`.
 
 | Folder | Contents |
 |---|---|
-| `pathsnap/` | library: `data.py` (I/O, projection), `labels.py` (route→observation alignment, evaluation only), `candidates.py` (candidate generation + 28 features), `dataset.py`, `models.py` (6 model definitions), `metrics.py`, `hmm.py` (HMM/Viterbi + route filling), `pipeline.py` (route-free inference), `plotstyle.py` |
-| `scripts/` | `eda.py`, `eda_plots.py`, `build_dataset.py`, `baseline.py`, `train_models.py`, `bayes_opt.py`, `hmm_eval.py`, `realign_eval.py`, `error_analysis.py`, `tune_v2.py`, `bayes_opt_v2.py`, `promote_v2.py`, `train_final_v2.py`, `select_final_v2.py`, `tune_decoder.py`, `decoder_grid_v2.py`, `bridge_eval.py`, `finalize_config.py`, `validate_final.py`, `model_plots.py`, `make_maps.py`, `smoke_test.py`, `build_report.py` |
+| `pathsnap/` | library: `data.py` (I/O, projection), `labels.py` (route→observation alignment, evaluation only), `candidates.py` (candidate generation; 28 round-1 features + 18 round-2 features), `dataset.py`, `models.py` (6 model definitions), `metrics.py`, `hmm.py` (HMM/Viterbi + route filling), `pipeline.py` (route-free inference), `plotstyle.py` |
+| `scripts/` | `eda.py`, `eda_plots.py`, `build_dataset.py`, `baseline.py`, `train_models.py`, `bayes_opt.py`, `hmm_eval.py`, `realign_eval.py`, `error_analysis.py`, `tune_v2.py`, `bayes_opt_v2.py`, `promote_v2.py`, `train_final_v2.py`, `select_final_v2.py`, `tune_decoder.py`, `decoder_grid_v2.py`, `bridge_eval.py`, `finalize_config.py`, `validate_final.py`, `model_plots.py`, `make_maps.py`, `smoke_test.py`, `robustness_test.py`, `preflight.py`, `build_report.py` |
 | `api/` | FastAPI server (`server.py`) and the separate server-side evaluation step (`evaluation.py`) |
 | `ui/` | evaluator UI (`index.html`, `app.js`, Leaflet) |
 | `models/` | trained models (`*.joblib`) and `final_config.json` (model + HMM parameters used by the API) |
@@ -96,6 +96,8 @@ python scripts/model_plots.py       # comparison figures + tables
 python scripts/make_maps.py --eda train 00000002
 python scripts/make_maps.py student_test 00000009 00000077
 python scripts/smoke_test.py        # fresh-process end-to-end check
+python scripts/robustness_test.py   # 16 awkward synthetic trips through a fresh API process (all must return 200)
+python scripts/preflight.py         # evaluation-day check of the configured partition (see Deployment)
 python scripts/diagrams.py          # pipeline / deployment diagrams
 python scripts/build_report.py      # report/PathSnap_Technical_Report.pdf
 python scripts/deck_data.py && (cd deck && npm install && node build_deck.js)   # deck/PathSnap_Pitch_Deck.pptx
@@ -112,6 +114,10 @@ export PATHSNAP_DATA="/path/to/data_root"      # contains the evaluation partiti
 export PATHSNAP_PARTITION=evaluator_test        # folder name holding the ten reserved trips
 uvicorn api.server:app --host 0.0.0.0 --port 8000
 ```
+
+Before the evaluator arrives, run `python scripts/preflight.py` with the same two environment variables: it checks every
+trip folder (files, shapes, ID ranges), runs the full deployed pipeline on each trip, prints the address to open on
+laptop 2 and exits non-zero if any trip cannot be served.
 
 Find its LAN IP (`ipconfig getifaddr en0` on macOS, `ipconfig` on Windows) and
 allow inbound TCP 8000 in the firewall. Every request is logged to the console

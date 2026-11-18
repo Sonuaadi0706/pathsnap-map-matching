@@ -31,8 +31,8 @@ def arrow(ax, x0, y0, x1, y1, txt=""):
 fig, ax = plt.subplots(figsize=(12, 3.1))
 ax.set_xlim(0, 12.2); ax.set_ylim(0, 3.1); ax.axis("off")
 steps = [("Raw trip files", ".track .nodes .arcs"), ("Projection\n+ QA", "local metres, gaps"),
-         ("Candidates", "KD-tree,\n80 m, K<=12"), ("28 features", "distance, heading,\ncontext, topology"),
-         ("Classifier", "LightGBM (tuned)\np(arc | fix)"), ("HMM / Viterbi", "graph distances,\ngaps, breaks"),
+         ("Candidates", "KD-tree,\n80 m, K<=24"), ("46 features", "distance, heading,\ncontext, topology"),
+         ("Scorer", "LightGBM LambdaRank\np(arc | fix)"), ("HMM / Viterbi", "graph distances,\ngaps, breaks"),
          ("Route", "arc sequence +\nshortest-path fill")]
 w, h, gap = 1.5, 1.35, 0.24
 for i, (t, s) in enumerate(steps):
@@ -41,7 +41,7 @@ for i, (t, s) in enumerate(steps):
     if i:
         arrow(ax, x - gap + 0.02, 1.4 + h / 2, x - 0.02, 1.4 + h / 2)
 ax.text(0.15, 0.95, "Training only:  .route  ->  monotone DP alignment of fixes to the reference arc sequence  ->  per-fix label "
-        "(y = 1 for the aligned arc)  ->  5-fold trip-grouped CV, Optuna TPE, decoder grid", fontsize=8.5, color=ps.INK)
+        "(y = 1 for the aligned arc)  ->  5-fold trip-grouped CV, Optuna TPE, decoder grid + held-out checks", fontsize=8.5, color=ps.INK)
 ax.text(0.15, 0.45, "Evaluation only (server side):  same alignment on the private reference -> top-1, macro-F1, continuity, route P/R/F1 "
         "(never fed back to the predictor)", fontsize=8.5, color=ps.INK)
 fig.savefig(ROOT / "figures/diagram_pipeline.png")

@@ -103,7 +103,7 @@ def predict(req: PredictRequest):
     ev = evaluate_prediction(trip, out["cls_pred"], hmm_pred, final_pred, route, out["graph"], PARTITION, DATA_ROOT)
     out["timings"]["evaluation_s"] = time.time() - t0
     st = ev.get("stages", {})
-    acc = lambda k: f"{st[k]['observation_top1_accuracy']:.4f}" if k in st else "n/a"  # noqa: E731
+    acc = lambda k: f"{st[k]['observation_top1_accuracy']:.4f}" if k in st and st[k]["observation_top1_accuracy"] is not None else "n/a"  # noqa: E731
     log.info("PREDICT done trip=%s obs=%d route_arcs=%d acc_final=%s acc_hmm=%s acc_cls=%s total=%.2fs",
              tid, trip.n_obs, len(route), acc("final"), acc("hmm"), acc("classifier_only"), out["timings"]["total_s"])
     return {
@@ -112,7 +112,7 @@ def predict(req: PredictRequest):
         "n_observations": trip.n_obs,
         "n_matched_observations": int((final_pred >= 0).sum()),
         "n_route_arcs": int(len(route)),
-        "n_hmm_segments": int(out["segments"].max() + 1) if trip.n_obs else 0,
+        "n_hmm_segments": int(out["segments"].max() + 1) if len(out["segments"]) else 0,
         "predicted_route_arc_ids": [int(a) for a in route],
         "predicted_route_lines": route_lines,
         "gps_points": gps,

@@ -68,6 +68,9 @@ PROMO = pd.read_csv(RES / "optuna_v2_promotion.csv")
 FINAL = json.load(open(ROOT / "models/final_config.json"))
 assert not FS["adopted_tuned_decoder"] and not FS["grid2"]["adopted"] and FS["selected_decoder"] == "round1_decoder"
 BR = J("bridge_eval.json")
+ROB = J("robustness_test.json")
+LAT = pd.read_csv(RES / "latency_large_trips.csv")
+assert ROB["all_ok"]
 MV2 = {m: J(f"model_{m}_v2feat.json") for m in MODELS}
 assert BR["adopted"] == FS["bridge_adopted"] == FINAL["hmm_params"]["bridge"]
 assert CHOICE["selected"] == "lgbm_v2_untuned"
@@ -213,8 +216,9 @@ P("Inputs per trip: a GPS track (longitude, latitude, timestamp), a road graph (
   "is <i>not</i> aligned to the track (the median trip has "
   f"{int(EDA.n_obs.median())} fixes but only {int(EDA.route_len_arcs.median())} route arcs), so per-observation "
   "labels must be derived (Section 2.1). We cast matching as <b>candidate ranking</b>: for fix <i>i</i> with "
-  "candidate set C<sub>i</sub>, a binary classifier estimates p(arc is the reference arc | features), the "
-  "probabilities are renormalised over C<sub>i</sub>, and the arg-max is the classifier-only prediction. "
+  "candidate set C<sub>i</sub>, a model scores every candidate (round 1: a binary classifier estimating p(arc is the "
+  "reference arc | features); deployed system: a LambdaRank model, Section 4.1), the scores are normalised into a "
+  "distribution over C<sub>i</sub>, and the arg-max is the scorer-only prediction. "
   "Because arc IDs are trip-specific, a multi-class formulation over global arc IDs would be meaningless; "
   "ranking per observation generalises across trips and cities. Sequence consistency is then enforced by "
   "an HMM whose hidden states are the candidates (Section 5).")
@@ -260,7 +264,7 @@ P("<b>Label derivation (training/evaluation only).</b> For each trip we align th
   "alignment, which we cannot verify independently.")
 P(f"<b>Candidate generation.</b> Arcs are densified every 10 m into a KD-tree (restricted to the track bounding "
   f"box + 280 m). For every fix we take arcs within {RADIUS_M:.0f} m, compute exact segment distance, and keep "
-  f"the {MAX_K} nearest (two-way streets contribute two co-located arcs). Original trip ID, observation index "
+  f"the {MAX_K} nearest in round 1 and the {V2['max_k']} nearest in the deployed system (two-way streets contribute two co-located arcs). Original trip ID, observation index "
   "and arc ID are preserved in every row. All 90 trips are processed in 14 s on 4 cores.")
 P("<b>Training rows.</b> 1 Hz fixes are highly autocorrelated, so models are fitted on every 3rd fix of each "
   "training trip (KNN: every 9th, for prediction cost); CV metrics use every 3rd fix of the validation trips; "
@@ -309,7 +313,8 @@ feat_tab = [["Group", "Features", "Rationale"],
             ["Topology", "same_prev/next, conn_prev/next, head_outdeg, tail_indeg, twoway", "Whether the candidate equals / touches the nearest arc of the adjacent fixes; intersection complexity."],
             ["Gaps", "gap_prev, gap_next", "Context features are less trustworthy across time gaps."]]
 table(feat_tab, widths=[2.6 * cm, 5.2 * cm, 9.6 * cm])
-P("Table 3. The 28 route-free features (pathsnap/candidates.py). None uses the reference route.", CAP)
+P("Table 3. The 28 route-free features of round 1 (pathsnap/candidates.py); the deployed scorer adds the 18 features of "
+  "Table 7a. None uses the reference route.", CAP)
 top = ", ".join(f"{k} ({v:.1%})" for k, v in FI.head(5).items())
 P(f"The round-1 tuned LightGBM attributes most split gain to {top} (Figure 7): relative distance and windowed heading "
   "agreement are the decisive signals, consistent with patterns (a) and (b).")
@@ -694,7 +699,8 @@ qa("1. Hidden states", "For fix i the hidden state is one of its candidate arcs 
    "with the projection fraction t<sub>c</sub> of the fix on that arc. The candidate-to-arc correspondence is the "
    "same table the classifier scored (trip, observation, arc ID), so the decoder returns an original arc ID per fix.")
 qa("2. Emission probabilities", "log e<sub>i</sub>(c) = w &middot; log q<sub>i</sub>(c), where q<sub>i</sub> is the "
-   "tuned LightGBM probability renormalised over C<sub>i</sub> (floor 1e-6). The weight w balances classifier "
+   "scorer's distribution over C<sub>i</sub> (floor 1e-6): the renormalised probability for binary models, and for the "
+   "deployed LambdaRank scorer a softmax of its scores with a temperature fitted on training out-of-fold scores. The weight w balances classifier "
    f"evidence against path plausibility; the selected value is w = {hp['w_emit']}.")
 qa("3. Transition probabilities", "log a(c, c') = -|d<sub>route</sub>(c, c') - d<sub>gc</sub>(z<sub>i</sub>, "
    "z<sub>i+1</sub>)| / &beta; - max(0, d<sub>route</sub>/&Delta;t - v<sub>max</sub>)/5 (Newson-Krumm style). "
@@ -721,10 +727,10 @@ qa("Viterbi recurrence (decoding procedure)", "Within a chain of fixes i = 1..n 
    "&psi;<sub>i</sub>(c') = argmax<sub>c</sub> [ &delta;<sub>i-1</sub>(c) + log a(c, c') ]. The chain ends at the "
    "last fix or at a break; the best final state argmax<sub>c</sub> &delta;<sub>n</sub>(c) is traced back through "
    "&psi; to give one arc per fix. Scores are kept in the log domain; the transition matrix of each step "
-   "(at most 12 &times; 12) is built with numpy from pre-computed shortest-path distances, so a trip of several "
+   "(at most 24 &times; 24) is built with numpy from pre-computed shortest-path distances, so a trip of several "
    "thousand fixes decodes in well under a second (Table 9).")
 qa("Decoder parameters", "Chosen by out-of-fold top-1 on the 80 training trips (5-fold OOF probabilities "
-   "from the selected model), never on student-test. A first grid &beta; &isin; {5, 10, 20, 40, 80} m &times; "
+   "from the round-1 scorer), never on student-test. A first grid &beta; &isin; {5, 10, 20, 40, 80} m &times; "
    "w &isin; {0.5, 1, 2} had its optimum on the boundary (&beta; = 5, w = 0.5), so it was extended to "
    f"&beta; &isin; {{2, 3.5}} and w &isin; {{0.25, 0.35}} ({len(HGRID)} settings in total). Selected: &beta; = "
    f"{hp['beta']}, w = {hp['w_emit']} (Figure 21). Small &beta; and w mean the decoder trusts path geometry "
@@ -743,12 +749,12 @@ P("Table 8. Classifier-only vs classifier + HMM on the 10 student-test trips wit
   "(results/hmm_ablation_models.csv). Top-1 is pooled over fixes; continuity and route F1 are trip means. "
   "Route F1 for classifier-only uses the collapsed per-fix arcs; for HMM the route with shortest-path filling.", CAP)
 P("<b>6. Did HMM decoding improve the final route?</b> " +
-  f"Yes for the selected model: top-1 {f3(HAB.loc[SEL, 'cls_top1'])} &rarr; {f3(HAB.loc[SEL, 'hmm_top1'])}, "
+  f"Yes. For the round-1 scorer (the grid experiment of this section): top-1 {f3(HAB.loc[SEL, 'cls_top1'])} &rarr; {f3(HAB.loc[SEL, 'hmm_top1'])}, "
   f"continuity {f3(HAB.loc[SEL, 'cls_continuity'])} &rarr; {f3(HAB.loc[SEL, 'hmm_continuity'])}, route F1 "
   f"{f3(HAB.loc[SEL, 'cls_route_f1'])} &rarr; {f3(HAB.loc[SEL, 'hmm_route_f1'])}. The gain is largest for weak "
   f"scorers (nearest-segment top-1 {f3(HAB.loc['baseline', 'cls_top1'])} &rarr; {f3(HAB.loc['baseline', 'hmm_top1'])}), "
   "showing that topology and timing recover much of what a pointwise scorer misses, while a good scorer still "
-  f"gives the best end result. Observation macro-F1 for the selected model rises from {f3(FT['cls']['macro_f1'])} to "
+  f"gives the best end result. Observation macro-F1 for the round-1 scorer rises from {f3(FT['cls']['macro_f1'])} to "
   f"{f3(FT['hmm']['macro_f1'])} after Viterbi. Log loss is N/A for decoded outputs: Viterbi returns a single best "
   "path, not a per-fix probability distribution.")
 ptrows = [["Trip", "Fixes", "Top-1 cls", "Top-1 HMM", "Top-1 final", "Cont. cls", "Cont. HMM", "Route F1 cls", "Route F1 HMM",
@@ -765,7 +771,7 @@ if len(hurt_top1):
     hurt_txt.append("top-1 decreased on " + ", ".join(f"{r.trip} ({r.cls_top1:.3f} &rarr; {r.hmm_top1:.3f})" for _, r in hurt_top1.iterrows()))
 if len(hurt_rf1):
     hurt_txt.append("route F1 decreased on " + ", ".join(f"{r.trip} ({r.cls_route_f1:.3f} &rarr; {r.hmm_route_f1:.3f})" for _, r in hurt_rf1.iterrows()))
-P("<b>Cases where HMM did not help.</b> " + ("; ".join(hurt_txt) + ". " if hurt_txt else "For the selected model "
+P("<b>Cases where HMM did not help.</b> " + ("; ".join(hurt_txt) + ". " if hurt_txt else "For the round-1 scorer "
   "no student-test trip got worse on top-1 or route F1. ") +
   "Where it hurts, the typical mechanism is a confident but wrong classifier run (e.g. on the reverse direction of a "
   "two-way street or a parallel service road) that is internally consistent, so the decoder keeps it; shortest-path "
@@ -1050,6 +1056,12 @@ P("<b>Limitations.</b> (1) Observation labels come from aligning fixes to the su
   "features are local and scale-free where possible, but this was only tested across the 90 supplied trips.")
 P("<b>Reproducibility.</b> Fixed seed 42; fold assignment stored in results/folds.json; exact package versions in "
   "requirements.txt; every figure and table is regenerated by the scripts listed in the README from the raw files. "
+  "scripts/robustness_test.py serves 16 awkward synthetic trips (single fix, empty track, track outside the road network, "
+  "huge time gap, coarse sampling, unsorted or duplicate timestamps, missing / empty / invalid reference route) from a fresh "
+  f"API process: all {sum(1 for k, v in ROB.items() if isinstance(v, dict))} requests return HTTP 200 with well-formed JSON (results/robustness_test.json); two "
+  "crashes found by this test (no arcs near the track; undefined continuity for very short trips) were fixed. The largest "
+  f"training trips (up to {int(LAT.n_obs.max()):,} fixes, up to {int(LAT.n_arcs.max()):,} arcs) take at most {LAT.total_s.max():.1f} s end to end "
+  "(results/latency_large_trips.csv). scripts/preflight.py repeats these checks on the evaluation partition before the demo. "
   "scripts/smoke_test.py re-runs the full raw-files-to-API path in a fresh process; its last run passed all checks "
   f"({', '.join(k for k, v in SMOKE['checks'].items() if v)}).")
 P("<b>AI assistance disclosure.</b> An AI coding assistant (Claude) was used to help write code and draft this "
