@@ -40,6 +40,7 @@ HSUM = J("hmm_summary.json")
 HAB = pd.read_csv(RES / "hmm_ablation_models.csv").set_index("model")
 HPT = pd.read_csv(RES / "hmm_test_pertrip.csv", dtype={"trip": str})
 HGRID = pd.read_csv(RES / "hmm_grid.csv")
+LC = pd.read_csv(RES / "learning_curve.csv").groupby(["model", "n_trips"])[["train_top1", "val_top1"]].mean()
 FI = pd.read_csv(RES / "feature_importance_lgbm_tuned.csv", index_col=0).iloc[:, 0].sort_values(ascending=False)
 SMOKE = J("smoke_test.json")
 RE = J("realign_summary.json")
@@ -689,6 +690,26 @@ P(f"Among the six binary models, {NAMES[bestv2]} has the best CV macro-F1 on the
   + ". Models that weight all standardised features equally or assume independence gain least from 18 additional, partly "
   "redundant features, while tree ensembles can use them selectively.")
 fig("optuna_v2_history.png", "Figure 20b. Round-2 Optuna optimisation history.", width=W * 0.8)
+P("<b>(f) Learning curves.</b> To separate under-fitting from over-fitting, the deployed scorer and logistic regression "
+  "(as a high-bias reference) were re-trained on nested random subsets of 4 to 64 training trips, with the 16 trips of the "
+  "validation fold fixed, for each of the five folds (<font face='Courier'>scripts/learning_curve.py</font>, "
+  "results/learning_curve.csv; student-test is not used).")
+fig("learning_curve.png", "Figure 20c. Learning curves on the round-2 table: top-1 on the trips used for training (dashed) and on "
+    "the unseen validation fold (solid) against the number of training trips; mean over 5 folds, band = fold std.", width=W * 0.95)
+_l, _g = LC.loc["logreg"], LC.loc["lgbm_v2"]
+_n0, _n1 = int(_g.index.min()), int(_g.index.max())
+P(f"Logistic regression: training and validation top-1 meet at {_l.val_top1[_n1]:.3f} "
+  f"(gap {_l.train_top1[_n1] - _l.val_top1[_n1]:+.3f} at {_n1} trips) and validation top-1 changes by only "
+  f"{_l.val_top1[_n1] - _l.val_top1[16]:+.3f} from 16 to {_n1} trips. More data cannot help a model whose two curves have already "
+  "converged, so its error is bias (under-fitting). "
+  f"Deployed scorer: it fits {_n0} trips perfectly (training top-1 {_g.train_top1[_n0]:.3f}); as trips are "
+  f"added, training top-1 falls to {_g.train_top1[_n1]:.3f} and validation top-1 rises from {_g.val_top1[_n0]:.3f} to "
+  f"{_g.val_top1[_n1]:.3f}, so the gap narrows from {_g.train_top1[_n0] - _g.val_top1[_n0]:.3f} to "
+  f"{_g.train_top1[_n1] - _g.val_top1[_n1]:.3f} but does not close. That remaining gap is variance (mild over-fitting), yet the "
+  f"scorer's validation curve lies above the logistic-regression curve at every size, so the extra capacity is a net gain. "
+  f"Its validation top-1 moves by {_g.val_top1[_n1] - _g.val_top1[16]:+.3f} between 16 and {_n1} trips, which is small "
+  "against the fold-to-fold std of about 0.02: more trips of the same kind would add little, and the remaining errors are better "
+  "addressed by the sequence decoder of Section 5 than by more scorer training.")
 story.append(PageBreak())
 
 # ================================================================== 5 HMM

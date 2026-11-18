@@ -1,0 +1,75 @@
+fold 0 n= 4 logreg   train 0.9317 val 0.8846 | 0s
+fold 0 n= 4 lgbm_v2  train 1.0000 val 0.9009 | 4s
+fold 0 n= 8 logreg   train 0.9151 val 0.8920 | 4s
+fold 0 n= 8 lgbm_v2  train 1.0000 val 0.9016 | 9s
+fold 0 n=16 logreg   train 0.9248 val 0.8940 | 9s
+fold 0 n=16 lgbm_v2  train 0.9998 val 0.9111 | 16s
+fold 0 n=32 logreg   train 0.9036 val 0.8945 | 17s
+fold 0 n=32 lgbm_v2  train 0.9880 val 0.9052 | 27s
+fold 0 n=48 logreg   train 0.9040 val 0.8947 | 29s
+fold 0 n=48 lgbm_v2  train 0.9847 val 0.9058 | 42s
+fold 0 n=64 logreg   train 0.9034 val 0.8958 | 45s
+fold 0 n=64 lgbm_v2  train 0.9794 val 0.9079 | 62s
+fold 1 n= 4 logreg   train 0.9344 val 0.9043 | 62s
+fold 1 n= 4 lgbm_v2  train 1.0000 val 0.9210 | 65s
+fold 1 n= 8 logreg   train 0.8347 val 0.8950 | 66s
+fold 1 n= 8 lgbm_v2  train 0.9818 val 0.9307 | 71s
+fold 1 n=16 logreg   train 0.8791 val 0.9066 | 72s
+fold 1 n=16 lgbm_v2  train 0.9908 val 0.9321 | 78s
+fold 1 n=32 logreg   train 0.8934 val 0.9113 | 79s
+fold 1 n=32 lgbm_v2  train 0.9835 val 0.9303 | 88s
+fold 1 n=48 logreg   train 0.9083 val 0.9135 | 91s
+fold 1 n=48 lgbm_v2  train 0.9834 val 0.9327 | 103s
+fold 1 n=64 logreg   train 0.8988 val 0.9133 | 106s
+fold 1 n=64 lgbm_v2  train 0.9780 val 0.9379 | 122s
+fold 2 n= 4 logreg   train 0.9656 val 0.8618 | 122s
+fold 2 n= 4 lgbm_v2  train 1.0000 val 0.8809 | 127s
+fold 2 n= 8 logreg   train 0.9430 val 0.8651 | 128s
+fold 2 n= 8 lgbm_v2  train 0.9991 val 0.8813 | 134s
+fold 2 n=16 logreg   train 0.9308 val 0.8648 | 135s
+fold 2 n=16 lgbm_v2  train 0.9992 val 0.8874 | 143s
+fold 2 n=32 logreg   train 0.9240 val 0.8650 | 145s
+fold 2 n=32 lgbm_v2  train 0.9965 val 0.8789 | 155s
+fold 2 n=48 logreg   train 0.9123 val 0.8682 | 157s
+fold 2 n=48 lgbm_v2  train 0.9900 val 0.8836 | 169s
+fold 2 n=64 logreg   train 0.9113 val 0.8690 | 172s
+fold 2 n=64 lgbm_v2  train 0.9865 val 0.8841 | 187s
+fold 3 n= 4 logreg   train 0.8925 val 0.9239 | 188s
+fold 3 n= 4 lgbm_v2  train 1.0000 val 0.9300 | 192s
+fold 3 n= 8 logreg   train 0.9087 val 0.9273 | 192s
+fold 3 n= 8 lgbm_v2  train 1.0000 val 0.9374 | 197s
+fold 3 n=16 logreg   train 0.9070 val 0.9213 | 198s
+fold 3 n=16 lgbm_v2  train 0.9998 val 0.9367 | 204s
+fold 3 n=32 logreg   train 0.9202 val 0.9237 | 206s
+fold 3 n=32 lgbm_v2  train 0.9975 val 0.9389 | 214s
+fold 3 n=48 logreg   train 0.8974 val 0.9233 | 217s
+fold 3 n=48 lgbm_v2  train 0.9829 val 0.9360 | 230s
+fold 3 n=64 logreg   train 0.8965 val 0.9243 | 233s
+fold 3 n=64 lgbm_v2  train 0.9797 val 0.9360 | 249s
+fold 4 n= 4 logreg   train 0.9353 val 0.8951 | 249s
+fold 4 n= 4 lgbm_v2  train 1.0000 val 0.9199 | 253s
+fold 4 n= 8 logreg   train 0.9012 val 0.8832 | 253s
+fold 4 n= 8 lgbm_v2  train 0.9994 val 0.9244 | 258s
+fold 4 n=16 logreg   train 0.9338 val 0.9055 | 259s
+fold 4 n=16 lgbm_v2  train 0.9997 val 0.9257 | 265s
+fold 4 n=32 logreg   train 0.9304 val 0.9089 | 266s
+fold 4 n=32 lgbm_v2  train 0.9992 val 0.9328 | 275s
+fold 4 n=48 logreg   train 0.8975 val 0.9010 | 277s
+fold 4 n=48 lgbm_v2  train 0.9841 val 0.9288 | 289s
+fold 4 n=64 logreg   train 0.9009 val 0.9061 | 292s
+fold 4 n=64 lgbm_v2  train 0.9793 val 0.9321 | 307s
+                train_top1         val_top1        
+                      mean     std     mean     std
+model   n_trips                                    
+lgbm_v2 4           1.0000  0.0000   0.9105  0.0197
+        8           0.9961  0.0080   0.9151  0.0232
+        16          0.9979  0.0040   0.9186  0.0200
+        32          0.9929  0.0068   0.9172  0.0250
+        48          0.9850  0.0029   0.9174  0.0223
+        64          0.9806  0.0034   0.9196  0.0232
+logreg  4           0.9319  0.0260   0.8939  0.0231
+        8           0.9005  0.0401   0.8925  0.0227
+        16          0.9151  0.0226   0.8985  0.0212
+        32          0.9143  0.0153   0.9007  0.0225
+        48          0.9039  0.0066   0.9002  0.0210
+        64          0.9022  0.0057   0.9017  0.0210

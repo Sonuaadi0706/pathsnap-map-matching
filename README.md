@@ -92,6 +92,7 @@ python scripts/bridge_eval.py lgbm_v2_untuned      # dropout bridging on/off und
 python scripts/finalize_config.py             # writes models/final_config.json from the recorded decisions
 python scripts/error_analysis.py              # deployed system: residual errors + leakage check
 python scripts/validate_final.py              # trip bootstrap, label sensitivity, independent recomputation
+python scripts/learning_curve.py           # learning curves: top-1 vs number of training trips (about 5 min)
 python scripts/model_plots.py       # comparison figures + tables
 python scripts/make_maps.py --eda train 00000002
 python scripts/make_maps.py student_test 00000009 00000077
