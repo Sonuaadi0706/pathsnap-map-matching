@@ -16,13 +16,13 @@ trip ID and shows the predicted route and scores.
 | Round 1 scorer (LightGBM binary, 28 features) | 0.903 | 0.911 | 0.863 | 0.952 |
 | Round 1 final (+ HMM/Viterbi + re-alignment) | 0.957 | 0.975 | 0.970 | 0.979 |
 | Round 2 scorer (LightGBM LambdaRank, 46 features, K=24) | 0.918 | 0.932 | 0.908 | 0.960 |
-| + HMM/Viterbi | 0.942 | 0.961 | 0.956 | 0.980 |
+| + HMM/Viterbi (dropout bridging) | 0.942 | 0.961 | 0.956 | 0.980 |
 | **+ re-alignment to the predicted route (deployed)** | **0.965** | **0.981** | **0.981** | **0.980** |
 
 * Length-weighted route F1 of the deployed system: 0.993 (student-test), 0.981 (training out-of-fold).
 * Trip-bootstrap 95% interval for the deployed top-1: [0.967, 0.992] on student-test;
   round 2 minus round 1: +0.0061 [+0.0030, +0.0083] on student-test and
-  +0.0077 [+0.0027, +0.0146] on the 80 training trips.
+  +0.0079 [+0.0031, +0.0147] on the 80 training trips.
 * What did **not** help (kept on record): a second Bayesian search over LightGBM hyperparameters tied the existing ones; two
   Bayesian searches over eight decoder parameters improved their tuning trips but not held-out training trips and were not adopted.
 * Labels are derived by aligning fixes to the supplied route and carry some noise (1.6% of moving fixes are
@@ -36,7 +36,7 @@ Full analysis: `report/PathSnap_Technical_Report.pdf`.
 | Folder | Contents |
 |---|---|
 | `pathsnap/` | library: `data.py` (I/O, projection), `labels.py` (route→observation alignment, evaluation only), `candidates.py` (candidate generation + 28 features), `dataset.py`, `models.py` (6 model definitions), `metrics.py`, `hmm.py` (HMM/Viterbi + route filling), `pipeline.py` (route-free inference), `plotstyle.py` |
-| `scripts/` | `eda.py`, `eda_plots.py`, `build_dataset.py`, `baseline.py`, `train_models.py`, `bayes_opt.py`, `hmm_eval.py`, `realign_eval.py`, `error_analysis.py`, `tune_v2.py`, `bayes_opt_v2.py`, `promote_v2.py`, `train_final_v2.py`, `select_final_v2.py`, `tune_decoder.py`, `decoder_grid_v2.py`, `validate_final.py`, `model_plots.py`, `make_maps.py`, `smoke_test.py`, `build_report.py` |
+| `scripts/` | `eda.py`, `eda_plots.py`, `build_dataset.py`, `baseline.py`, `train_models.py`, `bayes_opt.py`, `hmm_eval.py`, `realign_eval.py`, `error_analysis.py`, `tune_v2.py`, `bayes_opt_v2.py`, `promote_v2.py`, `train_final_v2.py`, `select_final_v2.py`, `tune_decoder.py`, `decoder_grid_v2.py`, `bridge_eval.py`, `finalize_config.py`, `validate_final.py`, `model_plots.py`, `make_maps.py`, `smoke_test.py`, `build_report.py` |
 | `api/` | FastAPI server (`server.py`) and the separate server-side evaluation step (`evaluation.py`) |
 | `ui/` | evaluator UI (`index.html`, `app.js`, Leaflet) |
 | `models/` | trained models (`*.joblib`) and `final_config.json` (model + HMM parameters used by the API) |
@@ -85,6 +85,8 @@ python scripts/promote_v2.py                  # re-score its top-5 trials at ful
 python scripts/train_final_v2.py lgbm_v2 lambdarank 3 promoted && python scripts/select_final_v2.py
 python scripts/tune_decoder.py lgbm_v2_untuned 64   # Bayesian decoder tuning with held-out training trips (not adopted)
 python scripts/decoder_grid_v2.py lgbm_v2_untuned   # 2-parameter decoder grid under the same rule (not adopted)
+python scripts/bridge_eval.py lgbm_v2_untuned      # dropout bridging on/off under a held-out rule (adopted)
+python scripts/finalize_config.py             # writes models/final_config.json from the recorded decisions
 python scripts/error_analysis.py              # deployed system: residual errors + leakage check
 python scripts/validate_final.py              # trip bootstrap, label sensitivity, independent recomputation
 python scripts/model_plots.py       # comparison figures + tables

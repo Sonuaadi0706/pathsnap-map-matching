@@ -42,6 +42,7 @@ class HMMParams:
     top_m: int = 0              # keep only the classifier's top-M candidates per fix as states (0 = all)
     uturn_pen: float = 0.0      # extra log-penalty for switching to the opposite-direction arc
     realign_max_m: float = 80.0  # re-alignment keeps the Viterbi arc beyond this distance
+    bridge: bool = False        # link across fixes that have no candidates (short dropouts) instead of breaking
 
 
 class RoadGraph:
@@ -138,19 +139,23 @@ def prepare(trip, cands, params: HMMParams = HMMParams(), score_col="pn", graph=
     P.starts = starts = np.searchsorted(obs, np.arange(n))
     P.ends = ends = np.searchsorted(obs, np.arange(n), side="right")
     P.g = g = graph or RoadGraph(trip, np.unique(arc))
-    P.gc = gc = np.r_[np.linalg.norm(np.diff(xy, axis=0), axis=1), 0]
-    P.dt = dt = np.r_[np.diff(t), 0]
-    P.has = has = ends > starts
+    # active fixes = fixes that have at least one candidate; step k links act[k] -> act[k+1]
+    P.act = act = np.where(ends > starts)[0]
+    P.dt = dt = np.diff(t[act]) if len(act) > 1 else np.zeros(0)
+    P.gc = gc = np.linalg.norm(np.diff(xy[act], axis=0), axis=1) if len(act) > 1 else np.zeros(0)
+    adjacent = np.diff(act) == 1 if len(act) > 1 else np.zeros(0, bool)
     gap_s = max(params.gap_s, Prep.PREP_GAP_S)
-    P.link = link = has[:-1] & has[1:] & (dt[:-1] <= gap_s) & (gc[:-1] <= params.gap_m)
+    # without bridging a fix without candidates breaks the chain (only adjacent fixes are linked);
+    # with bridging the neighbours of a short candidate dropout are linked directly
+    P.link = link = (dt <= gap_s) & (gc <= params.gap_m) & (adjacent | bool(params.bridge))
     pi_src, pi_dst, P.pair_slices = [], [], {}
     off = 0
-    for i in np.where(link)[0]:
-        A = arc[starts[i]:ends[i]]
-        B = arc[starts[i + 1]:ends[i + 1]]
+    for k in np.where(link)[0]:
+        A = arc[starts[act[k]]:ends[act[k]]]
+        B = arc[starts[act[k + 1]]:ends[act[k + 1]]]
         pi_src.append(np.repeat(trip.arcs[A, 1], len(B)))
         pi_dst.append(np.tile(trip.arcs[B, 0], len(A)))
-        P.pair_slices[i] = (off, off + len(A) * len(B))
+        P.pair_slices[k] = (off, off + len(A) * len(B))
         off += len(A) * len(B)
     P.SP = g.pair_distances(np.concatenate(pi_src), np.concatenate(pi_dst), params.sp_limit_m) if off else np.zeros(0)
     return P
@@ -158,58 +163,55 @@ def prepare(trip, cands, params: HMMParams = HMMParams(), score_col="pn", graph=
 
 def viterbi(P, params: HMMParams = HMMParams()):
     """Viterbi over prepared states. Returns (arc per observation, -1 = none; chain id per observation)."""
-    n, trip, arc, tp, starts, ends, has, g = P.n, P.trip, P.arc, P.tp, P.starts, P.ends, P.has, P.g
+    n, trip, arc, tp, starts, ends, g, act = P.n, P.trip, P.arc, P.tp, P.starts, P.ends, P.g, P.act
     L, gc, dt, SP = g.alen, P.gc, P.dt, P.SP
     frm, to = trip.arcs[:, 0], trip.arcs[:, 1]
     logp = params.w_emit * P.logq
-    link = P.link & (dt[:-1] <= params.gap_s)
+    link = P.link & (dt <= params.gap_s)
     pred = -np.ones(n, dtype=np.int64)
     seg = -np.ones(n, dtype=np.int64)
     seg_id = 0
     delta = None
     back = {}
-    cur_start = None
+    k_start = None
 
-    def backtrack(i_end, delta_end):
+    def backtrack(k_end, delta_end):
         j = int(np.argmax(delta_end))
-        i = i_end
+        k = k_end
         while True:
+            i = act[k]
             pred[i] = arc[starts[i] + j]
             seg[i] = seg_id
-            if i == cur_start:
+            if k == k_start:
                 break
-            j = back[i][j]
-            i -= 1
+            j = back[k][j]
+            k -= 1
 
-    for i in range(n):
-        if not has[i]:
-            if delta is not None:
-                backtrack(i - 1, delta)
-                seg_id += 1
-            delta, cur_start = None, None
-            continue
+    for k in range(len(act)):
+        i = act[k]
         e = logp[starts[i]:ends[i]]
         if delta is None:
-            delta, cur_start, back = e.copy(), i, {}
+            delta, k_start, back = e.copy(), k, {}
             continue
-        if not link[i - 1]:
-            backtrack(i - 1, delta)
+        if not link[k - 1]:
+            backtrack(k - 1, delta)
             seg_id += 1
-            delta, cur_start, back = e.copy(), i, {}
+            delta, k_start, back = e.copy(), k, {}
             continue
-        A = arc[starts[i - 1]:ends[i - 1]]
+        ip = act[k - 1]
+        A = arc[starts[ip]:ends[ip]]
         B = arc[starts[i]:ends[i]]
-        ta = tp[starts[i - 1]:ends[i - 1]]
+        ta = tp[starts[ip]:ends[ip]]
         tb = tp[starts[i]:ends[i]]
-        s0, s1 = P.pair_slices[i - 1]
+        s0, s1 = P.pair_slices[k - 1]
         sp = SP[s0:s1].reshape(len(A), len(B))
         r = (1 - ta)[:, None] * L[A][:, None] + sp + (tb * L[B])[None, :]
         same = A[:, None] == B[None, :]
         along = (tb[None, :] - ta[:, None]) * L[A][:, None]
         r_same = np.where(along >= -params.back_tol_m, np.abs(along), np.abs(along) + params.back_pen_m)
         r = np.where(same, r_same, r)
-        tr = -np.abs(r - gc[i - 1]) / params.beta
-        speed = r / max(dt[i - 1], 1e-3)
+        tr = -np.abs(r - gc[k - 1]) / params.beta
+        speed = r / max(dt[k - 1], 1e-3)
         tr = tr - np.maximum(0.0, speed - params.v_max) / 5.0
         if params.uturn_pen:
             rev = (frm[A][:, None] == to[B][None, :]) & (to[A][:, None] == frm[B][None, :])
@@ -218,14 +220,14 @@ def viterbi(P, params: HMMParams = HMMParams()):
         cand = delta[:, None] + tr
         best = cand.argmax(0)
         if np.all(cand.max(0) <= NEG / 2):  # disconnected: break the chain
-            backtrack(i - 1, delta)
+            backtrack(k - 1, delta)
             seg_id += 1
-            delta, cur_start, back = e.copy(), i, {}
+            delta, k_start, back = e.copy(), k, {}
             continue
-        back[i] = best
+        back[k] = best
         delta = cand[best, np.arange(len(B))] + e
     if delta is not None:
-        backtrack(n - 1, delta)
+        backtrack(len(act) - 1, delta)
     return pred, seg
 
 

@@ -67,6 +67,8 @@ DGRID = pd.read_csv(RES / "decoder_grid_v2.csv")
 PROMO = pd.read_csv(RES / "optuna_v2_promotion.csv")
 FINAL = json.load(open(ROOT / "models/final_config.json"))
 assert not FS["adopted_tuned_decoder"] and not FS["grid2"]["adopted"] and FS["selected_decoder"] == "round1_decoder"
+BR = J("bridge_eval.json")
+assert BR["adopted"] == FS["bridge_adopted"] == FINAL["hmm_params"]["bridge"]
 assert CHOICE["selected"] == "lgbm_v2_untuned"
 FTEST = pd.read_csv(RES / "final_test.csv", dtype={"trip": str})
 FTRAIN = pd.read_csv(RES / "final_train_oof.csv", dtype={"trip": str})
@@ -852,7 +854,22 @@ P(f"<b>Attempt 3: 2-parameter grid.</b> A 4 x 4 grid over &beta; in {{5, 10, 20,
   f"(&beta; = {g2['best_on_tuning_trips']['beta']:g}, w = {g2['best_on_tuning_trips']['w_emit']:g}) improves held-out top-1 "
   f"({f4(g2['heldout']['round1'])} to {f4(g2['heldout']['best'])}) but not held-out macro-F1 ({f4(g2['heldout']['round1_macro_f1'])} to "
   f"{f4(g2['heldout']['best_macro_f1'])}), so it is not adopted either. The decoder sits on a flat plateau: the round-1 setting "
-  f"(&beta; = {hp['beta']:g} m, w = {hp['w_emit']:g}) is kept for the deployed system, and all gains of round 2 come from the scorer.")
+  f"(&beta; = {hp['beta']:g} m, w = {hp['w_emit']:g}) is kept for the deployed system, and essentially all gains of round 2 come from the scorer.")
+b0, b1 = BR["train"]["no_bridge"], BR["train"]["bridge"]
+P("<b>Structural option: bridging candidate dropouts (adopted).</b> Looking at the weakest training trips showed one whose "
+  "track was cut into 716 separate Viterbi chains: the decoder broke the chain at every fix that had no candidate arc within "
+  "80 m. Standard practice is to skip such fixes and link their neighbours when the time and distance gap are within the usual "
+  "limits. Rule fixed before the run (scripts/bridge_eval.py): adopt if mean per-trip top-1 and macro-F1 do not decrease on the "
+  "16 held-out training trips and top-1 increases on the 64 tuning trips. Result: chains on the 80 training trips "
+  f"{b0['total_chains']} to {b1['total_chains']}; tuning trips {BR['tuning_trips']['no_bridge']['trip_mean_top1']:.4f} to "
+  f"{BR['tuning_trips']['bridge']['trip_mean_top1']:.4f}; held-out trips {BR['heldout_trips']['no_bridge']['trip_mean_top1']:.4f} to "
+  f"{BR['heldout_trips']['bridge']['trip_mean_top1']:.4f} (macro-F1 {BR['heldout_trips']['no_bridge']['trip_mean_macro_f1']:.4f} to "
+  f"{BR['heldout_trips']['bridge']['trip_mean_macro_f1']:.4f}); pooled training top-1 {f4(b0['final']['top1'])} to {f4(b1['final']['top1'])} "
+  f"({BR['train_trips_better']} trip better, {BR['train_trips_worse']} marginally worse); student-test unchanged (it has no such "
+  "dropouts). The rule is met, so bridging is switched on in the deployed decoder. Its accuracy effect is small; its value is "
+  "that routes are no longer fragmented by short candidate dropouts. The heavily fragmented trip itself (00000054) did not "
+  "improve in accuracy: 88% of its fixes lie off the reference route and are not scored, and the rest is limited by candidate "
+  "misses, i.e. by data rather than by the decoder.")
 fig("decoder_tuning_history.png", "Figure 23a. Decoder tuning, attempt 2: mean per-trip final top-1 on the 64 tuning trips per trial.", width=W * 0.8)
 
 P("5.4 Final system: results and validation", H2)
@@ -862,7 +879,7 @@ lad = [["Stage", "Train (CV / OOF) top-1", "Test top-1", "Test macro-F1", "Test 
        ["Round 1 + HMM/Viterbi (grid decoder)", f4(FTR["hmm"]["top1"]), f4(FT["hmm"]["top1"]), f4(FT["hmm"]["macro_f1"]), f4(FT["hmm"]["continuity"])],
        ["Round 1 final (+ re-alignment)", f4(FTR["realign"]["top1"]), f4(FT["realign"]["top1"]), f4(FT["realign"]["macro_f1"]), f4(FT["realign"]["continuity"])],
        [f"Round 2 scorer: LambdaRank, {len(FEATURES_V2)} features, K={V2['max_k']}", f4(F2R["cls"]["top1"]), f4(F2T["cls"]["top1"]), f4(F2T["cls"]["macro_f1"]), f4(F2T["cls"]["continuity"])],
-       ["Round 2 + HMM/Viterbi (same decoder setting)", f4(F2R["hmm"]["top1"]), f4(F2T["hmm"]["top1"]), f4(F2T["hmm"]["macro_f1"]), f4(F2T["hmm"]["continuity"])],
+       ["Round 2 + HMM/Viterbi (same &beta;, w; dropout bridging)", f4(F2R["hmm"]["top1"]), f4(F2T["hmm"]["top1"]), f4(F2T["hmm"]["macro_f1"]), f4(F2T["hmm"]["continuity"])],
        ["Round 2 final (+ re-alignment) = deployed system", f4(F2R["final"]["top1"]), f4(F2T["final"]["top1"]), f4(F2T["final"]["macro_f1"]), f4(F2T["final"]["continuity"])]]
 table(lad, widths=[7.4 * cm, 3.0 * cm, 2.2 * cm, 2.4 * cm, 2.4 * cm])
 P("Table 12c. Accuracy ladder. Train column: scorer rows on all fixes of the 80 training trips with out-of-fold scores; "

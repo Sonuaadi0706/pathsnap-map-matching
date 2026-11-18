@@ -10,12 +10,13 @@
   "uturn_pen": 0.0,
   "gap_s": 60.0,
   "top_m": 24,
-  "realign_max_m": 80.0
+  "realign_max_m": 80.0,
+  "bridge": true
  },
  "realign": true,
  "selection": {
-  "scorer": "round-2 scorer chosen by 5-fold trip-grouped CV (results/tune_v2_variants.csv, results/final_choice.json); hyperparameters = round-1 Bayesian-tuned values, kept after the round-2 search tied (results/optuna_v2_best.json, optuna_v2_promotion.csv)",
-  "decoder": "round-1 setting kept: Bayesian decoder tuning and a 2-parameter grid did not pass the held-out-training-trips rule (results/decoder_best.json, final_summary.json)",
+  "scorer": "round-2 scorer chosen by 5-fold trip-grouped CV (results/tune_v2_variants.csv, final_choice.json); hyperparameters = round-1 Bayesian-tuned values, kept after the round-2 search tied",
+  "decoder": "round-1 (beta, w) setting kept: Bayesian decoder tuning and a 2-parameter grid failed the held-out-training-trips rule (results/decoder_best.json, final_summary.json); dropout bridging adopted under the same kind of rule (results/bridge_eval.json)",
   "realign": "selected on training OOF in round 1 (results/realign_summary.json)"
  }
 }

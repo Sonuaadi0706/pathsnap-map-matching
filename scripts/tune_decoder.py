@@ -43,13 +43,13 @@ PREP.mkdir(parents=True, exist_ok=True)
 TOP_M = [6, 8, 12, 24]
 
 
-def get_prep(tid, part, c, top_m):
-    f = PREP / f"{MODEL}_{part}_{tid}_m{top_m}.pkl"
+def get_prep(tid, part, c, top_m, bridge=False):
+    f = PREP / f"{MODEL}_{part}_{tid}_m{top_m}{'_b' if bridge else ''}_v2.pkl"
     if f.exists():
         return joblib.load(f)
     tr = load_trip(tid, part, with_route=False)
     feat = pd.read_pickle(CACHE_V2 / f"feat_{part}_{tid}.pkl")[["obs", "arc", "t_proj"]]
-    P = prepare(tr, c.merge(feat, on=["obs", "arc"]), HMMParams(top_m=top_m))
+    P = prepare(tr, c.merge(feat, on=["obs", "arc"]), HMMParams(top_m=top_m, bridge=bridge))
     joblib.dump(P, f, compress=1)
     return P
 
@@ -61,9 +61,9 @@ def eval_trip(tid, part, c, configs, full=False):
     out, preps = [], {}
     for cfg in configs:
         hp = HMMParams(**cfg)
-        if hp.top_m not in preps:
-            preps[hp.top_m] = get_prep(tid, part, c, hp.top_m)
-        P = preps[hp.top_m]
+        if (hp.top_m, hp.bridge) not in preps:
+            preps[(hp.top_m, hp.bridge)] = get_prep(tid, part, c, hp.top_m, hp.bridge)
+        P = preps[(hp.top_m, hp.bridge)]
         t0 = time.time()
         vit, seg = viterbi(P, hp)
         route, _ = reconstruct_route(vit, seg, P.g)

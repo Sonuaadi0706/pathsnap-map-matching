@@ -74,21 +74,22 @@
     "continuity": 0.9541206937166699
    },
    "hmm": {
-    "top1": 0.942116294067068,
-    "macro_f1": 0.9366412839605236,
-    "continuity": 0.9748508141600712
+    "top1": 0.9421324161650902,
+    "macro_f1": 0.9366558527250923,
+    "continuity": 0.9748609757020616
    },
    "final": {
-    "top1": 0.964945184866724,
-    "macro_f1": 0.9675626091656422,
-    "continuity": 0.9748682025460098
+    "top1": 0.9651816423043852,
+    "macro_f1": 0.9676650806375452,
+    "continuity": 0.9748654303175774
    },
-   "route_f1": 0.9810292591081202,
-   "route_precision": 0.9725807948461987,
-   "route_recall": 0.9914081242375765,
-   "mean_decode_s": 0.2743431210517883,
-   "max_decode_s": 1.643214225769043,
-   "trip_mean_top1": 0.9651317594718976
+   "route_f1": 0.9805441880819756,
+   "route_precision": 0.9716686409294505,
+   "route_recall": 0.9915498360570233,
+   "mean_decode_s": 0.2640425145626068,
+   "max_decode_s": 1.5720858573913574,
+   "trip_mean_top1": 0.9651661194871621,
+   "total_chains": 208
   }
  },
  "tuning_trips": {
@@ -189,9 +190,10 @@
    "route_f1": 0.9929697809937705,
    "route_precision": 0.9896631534073311,
    "route_recall": 0.9963388403342048,
-   "mean_decode_s": 0.16742055416107177,
-   "max_decode_s": 0.49756503105163574,
-   "trip_mean_top1": 0.9806194319654491
+   "mean_decode_s": 0.19016220569610595,
+   "max_decode_s": 0.47594189643859863,
+   "trip_mean_top1": 0.9806194319654491,
+   "total_chains": 11
   }
  },
  "adopted_tuned_decoder": false,
@@ -223,5 +225,17 @@
    "best_macro_f1": 0.9812688485224107
   },
   "adopted": false
+ },
+ "bridge_adopted": true,
+ "final_params": {
+  "beta": 20.0,
+  "w_emit": 0.25,
+  "back_tol_m": 15.0,
+  "back_pen_m": 60.0,
+  "uturn_pen": 0.0,
+  "gap_s": 60.0,
+  "top_m": 24,
+  "realign_max_m": 80.0,
+  "bridge": true
  }
 }
